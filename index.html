@@ -131,6 +131,9 @@
   .card.move .plane { font-size: 34px; }
   .card.move .name { margin: 6px 0 2px; }
   .card.move .time { font-size: 16px; color: var(--sub); }
+  /* 行き方の手順はふつうの文と同じく左寄せで読む。短いメモは中央のまま */
+  .card.move .move-memo { flex: 0 1 auto; margin-top: 8px; color: var(--sub); font-size: 13px; }
+  .card.move .move-memo:has(ol) { align-self: stretch; text-align: left; color: var(--text); font-size: 14px; }
 
   #toast {
     position: fixed; left: 50%; top: calc(env(safe-area-inset-top) + 60px); transform: translateX(-50%);
@@ -207,7 +210,7 @@ function cardHtml(it, i) {
       <div class="plane" aria-hidden="true">${esc(it.icon || '✈︎')}</div>
       <div class="name">${esc(it.name)}</div>
       <div class="time">${hm(it.time)} → ${hm(it.end)}</div>
-      ${it.memo ? `<div class="note">${esc(it.memo)}</div>` : ''}
+      ${it.memo ? `<div class="memo move-memo">${memoHtml(it.memo)}</div>` : ''}
     </article>`;
   }
   const hasPlace = it.lat != null;
