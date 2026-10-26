@@ -46,7 +46,7 @@
   }
 
   header {
-    display: flex; align-items: center; gap: 8px;
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
     padding: calc(env(safe-area-inset-top) + 8px) 16px 8px;
     background: var(--bg); border-bottom: 1px solid var(--line); z-index: 2;
   }
@@ -56,6 +56,15 @@
     border: 0; border-radius: 999px; padding: 8px 14px; font-size: 14px; font-weight: 700;
     background: var(--accent); color: #fff; font-family: inherit;
   }
+  /* 日の切りかえ(day2.json などがある時だけ出る) */
+  #days { flex: 1 0 100%; display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+  #days:empty { display: none; }
+  #days::-webkit-scrollbar { display: none; }
+  #days a {
+    flex: 0 0 auto; padding: 6px 12px; border-radius: 999px; text-decoration: none;
+    background: var(--chip); color: var(--text); font-size: 13px; font-weight: 700;
+  }
+  #days a.on { background: var(--accent); color: #fff; }
 
   #map { flex: 1 1 50%; min-height: 0; background: var(--chip); }
   /* 暗い画面では地図の色を反転して目にやさしく(地図の画像そのものは1種類だけ使う) */
@@ -137,6 +146,7 @@
 <header>
   <h1 id="title">読みこみ中…</h1>
   <button class="now-btn" id="nowBtn" type="button">今ここ</button>
+  <nav id="days" aria-label="日の切りかえ"></nav>
 </header>
 <div id="map" role="region" aria-label="地図"></div>
 <div id="panel">
@@ -148,8 +158,10 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"
         integrity="sha384-NElt3Op+9NBMCYaef5HxeJmU4Xeard/Lku8ek6hoPTvYkQPh3zLIrJP7KiRocsxO" crossorigin="anonymous"></script>
 <script>
-// 日を増やす時は ?day=day2 のように URL の後ろにつける(data/day2.json を読む)
-const DAY = new URLSearchParams(location.search).get('day') || 'day1';
+// data/day1.json, day2.json … を順に読んで、上に日の切りかえを出す。
+// ?day=day2 で開くとその日。つけずに開くと、旅行の当日ならその日、ほかは1日目。
+const DAY_PARAM = new URLSearchParams(location.search).get('day');
+let DAY = DAY_PARAM || 'day1';
 const CIRCLED = ['', '①','②','③','④','⑤','⑥','⑦','⑧','⑨','⑩','⑪','⑫','⑬','⑭','⑮','⑯','⑰','⑱','⑲','⑳'];
 
 let data, items = [], markers = {}, active = -1, map;
@@ -262,6 +274,31 @@ function setActive(i, { scroll = false, fly = true } = {}) {
   }
 }
 
+// 今日の日付(日本・韓国とも +9時間)
+function todayStr() { return new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10); }
+
+// day1, day2 … と、ないファイルに当たるまで読む
+async function loadDays() {
+  const days = [];
+  for (let n = 1; n <= 14; n++) {
+    try {
+      const res = await fetch(`data/day${n}.json`, { cache: 'no-cache' });
+      if (!res.ok) break;
+      days.push({ id: 'day' + n, data: await res.json() });
+    } catch (e) { break; }
+  }
+  return days;
+}
+
+function daysHtml(days) {
+  if (days.length < 2) return '';
+  return days.map(d => {
+    const [, mo, dd] = d.data.date.split('-').map(Number);
+    const label = (d.data.title.match(/\d+日目/) || [d.id])[0] + ' ' + mo + '/' + dd;
+    return `<a href="?day=${encodeURIComponent(d.id)}" class="${d.id === DAY ? 'on' : ''}"${d.id === DAY ? ' aria-current="page"' : ''}>${esc(label)}</a>`;
+  }).join('');
+}
+
 // 今の時刻(日本・韓国とも +9時間)に合わせる。
 // 旅行の日なら「いま始まっている予定」、ほかの日は時刻だけで合わせる。
 function nowIndex() {
@@ -279,10 +316,15 @@ function nowIndex() {
 }
 
 async function main() {
+  const days = await loadDays();
+  if (!DAY_PARAM) DAY = (days.find(d => d.data.date === todayStr()) || days[0] || { id: 'day1' }).id;
   try {
-    const res = await fetch(`data/${encodeURIComponent(DAY)}.json`, { cache: 'no-cache' });
-    if (!res.ok) throw new Error(res.status);
-    data = await res.json();
+    data = days.find(d => d.id === DAY)?.data;
+    if (!data) {
+      const res = await fetch(`data/${encodeURIComponent(DAY)}.json`, { cache: 'no-cache' });
+      if (!res.ok) throw new Error(res.status);
+      data = await res.json();
+    }
   } catch (e) {
     $('#title').textContent = 'データを読みこめませんでした';
     $('#cards').innerHTML = '<p id="error">data/' + esc(DAY) + '.json が見つかりません。</p>';
@@ -292,6 +334,8 @@ async function main() {
   const [, mo, d] = data.date.split('-').map(Number);
   $('#title').innerHTML = esc(data.title) + `<small>${mo}/${d}(${esc(data.weekday || '')})</small>`;
   document.title = data.title + ' マップ';
+  $('#days').innerHTML = daysHtml(days);
+  $('#days .on')?.scrollIntoView({ inline: 'center', block: 'nearest' });
 
   map = L.map('map', { zoomControl: false, attributionControl: true });
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
