@@ -83,9 +83,14 @@
   .leaflet-marker-icon.on-top { z-index: 9999 !important; }
   /* 乗り降りする駅(その移動カードを選んだ時だけ出る) */
   .station {
-    position: absolute; transform: translate(-50%, -50%); white-space: nowrap;
+    position: absolute; transform: translate(-50%, calc(-100% - 18px)); white-space: nowrap;
     background: var(--card); color: var(--text); border: 2px solid var(--text); border-radius: 8px;
     padding: 3px 7px; font: 700 12px/1.2 -apple-system, "Hiragino Sans", sans-serif; box-shadow: 0 2px 6px rgba(0,0,0,.3);
+  }
+  /* 札の下の小さな点が駅の位置 */
+  .station::after {
+    content: ''; position: absolute; left: 50%; bottom: -18px; width: 8px; height: 8px; margin-left: -4px;
+    border-radius: 50%; background: var(--text); box-shadow: 0 0 0 2px var(--card);
   }
   .station small { color: var(--accent); margin-left: 4px; font-size: 11px; }
 
@@ -140,7 +145,8 @@
   .card.move .time { font-size: 16px; color: var(--sub); }
   /* 行き方の手順はふつうの文と同じく左寄せで読む。短いメモは中央のまま */
   .card.move .move-memo { flex: 0 1 auto; margin-top: 8px; color: var(--sub); font-size: 13px; }
-  .card.move .btns { align-self: stretch; }
+  .card.move .btns { align-self: stretch; flex-wrap: wrap; }
+  .card.move .btns a { flex: 1 1 auto !important; padding: 8px 10px; font-size: 13px; }
   .card.move .move-memo:has(ol) { align-self: stretch; text-align: left; color: var(--text); font-size: 14px; }
 
   #toast {
@@ -376,7 +382,7 @@ async function main() {
   items.forEach((it, i) => {
     if (!it.stations) return;
     stationLayers[i] = L.layerGroup(it.stations.map(st => L.marker([st.lat, st.lng], {
-      icon: L.divIcon({ className: '', html: `<div class="station">🚇 ${esc(st.name)}${st.role ? `<small>${esc(st.role)}</small>` : ''}</div>`, iconSize: [0, 0] }),
+      icon: L.divIcon({ className: '', html: `<div class="station">${esc(st.icon || '🚇')} ${esc(st.name)}${st.role ? `<small>${esc(st.role)}</small>` : ''}</div>`, iconSize: [0, 0] }),
       title: st.name, keyboard: false
     })));
   });
