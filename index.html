@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>旅のしおりマップ</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"
+      integrity="sha384-c6Rcwz4e4CITMbu/NBmnNS8yN2sC3cUElMEMfP3vqqKFp7GOYaaBBCqmaWBjmkjb" crossorigin="anonymous">
+<style>
+  :root {
+    --bg: #f6f5f2;
+    --card: #ffffff;
+    --text: #1d1d1f;
+    --sub: #6b6b70;
+    --line: #e3e1dc;
+    --accent: #e8590c;      /* 印・線・強調 */
+    --naver: #03c75a;       /* NAVER の緑 */
+    --naver-text: #ffffff;
+    --chip: #f0eee9;
+    --shadow: 0 6px 20px rgba(0,0,0,.10);
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #141416; --card: #1f1f22; --text: #f2f2f4; --sub: #a1a1a8; --line: #333338;
+      --accent: #ff8a3d; --naver: #03c75a; --naver-text: #ffffff; --chip: #2a2a2e;
+      --shadow: 0 6px 20px rgba(0,0,0,.45);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #141416; --card: #1f1f22; --text: #f2f2f4; --sub: #a1a1a8; --line: #333338;
+    --accent: #ff8a3d; --naver: #03c75a; --naver-text: #ffffff; --chip: #2a2a2e;
+    --shadow: 0 6px 20px rgba(0,0,0,.45);
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif;
+    display: flex; flex-direction: column; height: 100dvh; overflow: hidden;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  header {
+    display: flex; align-items: center; gap: 8px;
+    padding: calc(env(safe-area-inset-top) + 8px) 16px 8px;
+    background: var(--bg); border-bottom: 1px solid var(--line); z-index: 2;
+  }
+  header h1 { font-size: 16px; margin: 0; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  header h1 small { color: var(--sub); font-weight: 500; margin-left: 6px; }
+  .now-btn {
+    border: 0; border-radius: 999px; padding: 8px 14px; font-size: 14px; font-weight: 700;
+    background: var(--accent); color: #fff; font-family: inherit;
+  }
+
+  #map { flex: 1 1 50%; min-height: 0; background: var(--chip); }
+  /* 暗い画面では地図の色を反転して目にやさしく(地図の画像そのものは1種類だけ使う) */
+  :root[data-theme="dark"] .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.9) contrast(.9); }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.9) contrast(.9); }
+  }
+
+  .pin {
+    width: 28px; height: 28px; border-radius: 50%;
+    background: var(--card); color: var(--accent); border: 2.5px solid var(--accent);
+    display: grid; place-items: center; font: 700 13px/1 -apple-system, sans-serif;
+    box-shadow: 0 2px 6px rgba(0,0,0,.3); transition: transform .2s;
+  }
+  .pin.on { background: var(--accent); color: #fff; transform: scale(1.35); }
+  .leaflet-marker-icon.on-top { z-index: 9999 !important; }
+
+  #panel { flex: 1 1 50%; min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
+  #dots { display: flex; justify-content: center; gap: 5px; padding: 8px 16px 0; flex-wrap: wrap; }
+  #dots span { width: 6px; height: 6px; border-radius: 50%; background: var(--line); }
+  #dots span.on { background: var(--accent); width: 16px; border-radius: 3px; }
+
+  #cards {
+    flex: 1; min-height: 0; display: flex; gap: 10px;
+    overflow-x: auto; overflow-y: hidden; scroll-snap-type: x mandatory;
+    padding: 10px 16px calc(env(safe-area-inset-bottom) + 12px);
+    scroll-padding: 0 16px; scrollbar-width: none; overscroll-behavior-x: contain;
+  }
+  #cards::-webkit-scrollbar { display: none; }
+
+  .card {
+    flex: 0 0 calc(100% - 28px); scroll-snap-align: start; scroll-snap-stop: always;
+    background: var(--card); border-radius: 16px; box-shadow: var(--shadow);
+    padding: 14px 16px; display: flex; flex-direction: column; min-height: 0;
+    border: 1.5px solid transparent;
+  }
+  .card.on { border-color: var(--accent); }
+  .card-head { display: flex; align-items: center; gap: 10px; }
+  .num {
+    flex: 0 0 auto; width: 30px; height: 30px; border-radius: 50%;
+    background: var(--accent); color: #fff; display: grid; place-items: center; font-weight: 700; font-size: 14px;
+  }
+  .num.plain { background: var(--chip); color: var(--sub); }
+  .time { font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .name { font-size: 16px; font-weight: 700; margin: 8px 0 6px; line-height: 1.35; }
+  .memo { flex: 1; min-height: 0; overflow-y: auto; font-size: 14px; line-height: 1.55; color: var(--text); }
+  .memo ol { margin: 0; padding-left: 1.3em; }
+  .memo li { margin: 2px 0; }
+  .memo li::marker { color: var(--sub); font-size: 12px; }
+  .memo p { margin: 0 0 4px; }
+  .memo ol + *, .memo p + ol { margin-top: 4px; }
+  .note { font-size: 12px; color: var(--sub); margin-top: 6px; }
+
+  .btns { display: flex; gap: 8px; margin-top: 10px; }
+  .btns a {
+    flex: 1; text-align: center; text-decoration: none; border-radius: 10px;
+    padding: 11px 8px; font-size: 14px; font-weight: 700; line-height: 1.2;
+  }
+  .btn-naver { background: var(--naver); color: var(--naver-text); flex: 1.6 !important; }
+  .btn-google { background: var(--chip); color: var(--text); }
+  .btn-main { background: var(--accent); color: #fff; flex: 1.6 !important; }
+
+  .card.move { background: var(--chip); box-shadow: none; justify-content: center; align-items: center; text-align: center; }
+  .card.move .plane { font-size: 34px; }
+  .card.move .name { margin: 6px 0 2px; }
+  .card.move .time { font-size: 16px; color: var(--sub); }
+
+  #toast {
+    position: fixed; left: 50%; top: calc(env(safe-area-inset-top) + 60px); transform: translateX(-50%);
+    background: rgba(30,30,32,.92); color: #fff; padding: 8px 14px; border-radius: 10px;
+    font-size: 13px; z-index: 1000; opacity: 0; transition: opacity .25s; pointer-events: none;
+    max-width: calc(100% - 32px); text-align: center;
+  }
+  #toast.show { opacity: 1; }
+  #error { padding: 24px 16px; color: var(--sub); }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">読みこみ中…</h1>
+  <button class="now-btn" id="nowBtn" type="button">今ここ</button>
+</header>
+<div id="map" role="region" aria-label="地図"></div>
+<div id="panel">
+  <div id="dots" aria-hidden="true"></div>
+  <div id="cards" role="list"></div>
+</div>
+<div id="toast" role="status"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"
+        integrity="sha384-NElt3Op+9NBMCYaef5HxeJmU4Xeard/Lku8ek6hoPTvYkQPh3zLIrJP7KiRocsxO" crossorigin="anonymous"></script>
+<script>
+// 日を増やす時は ?day=day2 のように URL の後ろにつける(data/day2.json を読む)
+const DAY = new URLSearchParams(location.search).get('day') || 'day1';
+const CIRCLED = ['', '①','②','③','④','⑤','⑥','⑦','⑧','⑨','⑩','⑪','⑫','⑬','⑭','⑮','⑯','⑰','⑱','⑲','⑳'];
+
+let data, items = [], markers = {}, active = -1, map;
+
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const hm = t => t.replace(/^0/, '');
+
+function toast(msg) {
+  const el = $('#toast');
+  el.textContent = msg; el.classList.add('show');
+  clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove('show'), 2600);
+}
+
+// NAVER はアプリを直接開くのがいちばん確実(座標で場所を指せる)。
+// アプリが入っていない時は 1.5 秒後にサイトの検索へ切り替える。
+function openNaver(it, e) {
+  e.preventDefault();
+  const app = 'nmap://place?lat=' + it.lat + '&lng=' + it.lng +
+              '&name=' + encodeURIComponent(it.name) + '&appname=' + encodeURIComponent(location.hostname || 'trip-map');
+  const web = 'https://map.naver.com/p/search/' + encodeURIComponent(it.kr || it.name);
+  const t = setTimeout(() => { if (!document.hidden) location.href = web; }, 1500);
+  document.addEventListener('visibilitychange', () => clearTimeout(t), { once: true });
+  location.href = app;
+}
+// 座標があやしい所(住所からのおおよその位置)は、googleQuery に住所を書いておくと住所で探す
+function googleUrl(it) {
+  return 'https://www.google.com/maps/search/?api=1&query=' + (it.googleQuery ? encodeURIComponent(it.googleQuery) : it.lat + ',' + it.lng);
+}
+
+function memoHtml(memo) {
+  // 文(。)ごとに分け、「→」でつながった文は番号つきの手順にして読みやすく
+  return String(memo || '').split('。').map(s => s.trim()).filter(Boolean).map(sentence => {
+    const steps = sentence.split('→').map(s => s.trim()).filter(Boolean);
+    if (steps.length <= 1) return '<p>' + esc(sentence) + '</p>';
+    return '<ol>' + steps.map(s => '<li>' + esc(s) + '</li>').join('') + '</ol>';
+  }).join('');
+}
+
+function cardHtml(it, i) {
+  if (it.type === 'move') {
+    return `<article class="card move" role="listitem" data-i="${i}">
+      <div class="plane" aria-hidden="true">${esc(it.icon || '✈︎')}</div>
+      <div class="name">${esc(it.name)}</div>
+      <div class="time">${hm(it.time)} → ${hm(it.end)}</div>
+      ${it.memo ? `<div class="note">${esc(it.memo)}</div>` : ''}
+    </article>`;
+  }
+  const hasPlace = it.lat != null;
+  let btns = '';
+  if (hasPlace && it.country === 'kr') {
+    btns = `<a class="btn-naver" href="#" data-naver="${i}">NAVERマップで開く</a>
+            <a class="btn-google" href="${googleUrl(it)}" target="_blank" rel="noopener">Googleマップ</a>`;
+  } else if (hasPlace) {
+    // 日本の中は Google マップのナビが使えるので、こちらを目立たせる
+    btns = `<a class="btn-main" href="${googleUrl(it)}" target="_blank" rel="noopener">Googleマップで開く</a>`;
+  }
+  return `<article class="card" role="listitem" data-i="${i}">
+    <div class="card-head">
+      <div class="num ${hasPlace ? '' : 'plain'}">${it.no ?? ''}</div>
+      <div class="time">${hm(it.time)}</div>
+    </div>
+    <div class="name">${esc(it.name)}</div>
+    <div class="memo">${memoHtml(it.memo)}</div>
+    ${hasPlace ? '' : '<div class="note">地図の印はありません</div>'}
+    ${it.note ? `<div class="note">${esc(it.note)}</div>` : ''}
+    ${btns ? `<div class="btns">${btns}</div>` : ''}
+  </article>`;
+}
+
+function places() { return items.filter(it => it.lat != null); }
+function allBounds() { return L.latLngBounds(places().map(p => [p.lat, p.lng])); }
+
+// 前後のスポット(移動カードや印のないカードで地図をどこに向けるかに使う)
+function neighbor(i, dir) {
+  for (let j = i + dir; j >= 0 && j < items.length; j += dir) if (items[j].lat != null) return items[j];
+  return null;
+}
+
+function focus(i) {
+  const it = items[i];
+  if (it.lat != null) {
+    const zoom = it.country === 'kr' && !/空港/.test(it.name) ? 16 : 14;
+    map.flyTo([it.lat, it.lng], zoom, { duration: .8 });
+  } else if (it.type === 'move') {
+    const a = neighbor(i, -1), b = neighbor(i, 1);
+    if (a && b) map.flyToBounds([[a.lat, a.lng], [b.lat, b.lng]], { padding: [40, 40], duration: .8 });
+  } else {
+    map.flyToBounds(allBounds(), { padding: [30, 30], duration: .8 });
+  }
+}
+
+function setActive(i, { scroll = false, fly = true } = {}) {
+  if (i < 0 || i >= items.length) return;
+  if (i !== active) {
+    document.querySelectorAll('.card.on').forEach(c => c.classList.remove('on'));
+    document.querySelectorAll('#dots span.on').forEach(c => c.classList.remove('on'));
+    Object.values(markers).forEach(m => { m.getElement()?.classList.remove('on-top'); m.getElement()?.querySelector('.pin')?.classList.remove('on'); });
+    document.querySelector(`.card[data-i="${i}"]`)?.classList.add('on');
+    document.querySelectorAll('#dots span')[i]?.classList.add('on');
+    const m = markers[i];
+    if (m) { m.getElement()?.classList.add('on-top'); m.getElement()?.querySelector('.pin')?.classList.add('on'); }
+    active = i;
+    if (fly) focus(i);
+  }
+  if (scroll) {
+    const card = document.querySelector(`.card[data-i="${i}"]`);
+    const box = $('#cards');
+    box.scrollTo({ left: card.offsetLeft - box.offsetLeft - 16, behavior: 'smooth' });
+  }
+}
+
+// 今の時刻(日本・韓国とも +9時間)に合わせる。
+// 旅行の日なら「いま始まっている予定」、ほかの日は時刻だけで合わせる。
+function nowIndex() {
+  const offMin = 9 * 60;
+  const local = new Date(Date.now() + offMin * 60000);
+  const today = local.toISOString().slice(0, 10);
+  const mins = local.getUTCHours() * 60 + local.getUTCMinutes();
+  const isDay = today === data.date;
+  let idx = 0;
+  items.forEach((it, i) => {
+    const [h, m] = it.time.split(':').map(Number);
+    if (h * 60 + m <= mins) idx = i;
+  });
+  return { idx, isDay };
+}
+
+async function main() {
+  try {
+    const res = await fetch(`data/${encodeURIComponent(DAY)}.json`, { cache: 'no-cache' });
+    if (!res.ok) throw new Error(res.status);
+    data = await res.json();
+  } catch (e) {
+    $('#title').textContent = 'データを読みこめませんでした';
+    $('#cards').innerHTML = '<p id="error">data/' + esc(DAY) + '.json が見つかりません。</p>';
+    return;
+  }
+  items = data.items;
+  const [, mo, d] = data.date.split('-').map(Number);
+  $('#title').innerHTML = esc(data.title) + `<small>${mo}/${d}(${esc(data.weekday || '')})</small>`;
+  document.title = data.title + ' マップ';
+
+  map = L.map('map', { zoomControl: false, attributionControl: true });
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+  }).addTo(map);
+  map.fitBounds(allBounds(), { padding: [30, 30] });
+
+  // スポットを順番に線で結ぶ。飛行機の区間は点線にする。
+  let prev = null, dashed = false;
+  items.forEach(it => {
+    if (it.type === 'move') { dashed = true; return; }
+    if (it.lat == null) return;
+    if (prev) {
+      L.polyline([[prev.lat, prev.lng], [it.lat, it.lng]], {
+        color: getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#e8590c',
+        weight: 3, opacity: .75, dashArray: dashed ? '6 8' : null
+      }).addTo(map);
+    }
+    prev = it; dashed = false;
+  });
+
+  items.forEach((it, i) => {
+    if (it.lat == null) return;
+    const m = L.marker([it.lat, it.lng], {
+      icon: L.divIcon({ className: '', html: `<div class="pin">${it.no}</div>`, iconSize: [28, 28], iconAnchor: [14, 14] }),
+      title: `${CIRCLED[it.no] || it.no} ${it.name}`, keyboard: true
+    }).addTo(map);
+    m.on('click', () => setActive(i, { scroll: true }));
+    markers[i] = m;
+  });
+
+  $('#cards').innerHTML = items.map(cardHtml).join('');
+  $('#dots').innerHTML = items.map(() => '<span></span>').join('');
+  document.querySelectorAll('[data-naver]').forEach(a =>
+    a.addEventListener('click', e => openNaver(items[+a.dataset.naver], e)));
+
+  // スワイプが止まったら、いちばん左に来たカードを選ぶ
+  const box = $('#cards');
+  let st;
+  const pick = () => {
+    const cards = [...box.querySelectorAll('.card')];
+    const x = box.scrollLeft;
+    let best = 0, bestD = Infinity;
+    cards.forEach((c, i) => { const d = Math.abs(c.offsetLeft - box.offsetLeft - 16 - x); if (d < bestD) { bestD = d; best = i; } });
+    setActive(best);
+  };
+  box.addEventListener('scroll', () => { clearTimeout(st); st = setTimeout(pick, 120); }, { passive: true });
+
+  $('#nowBtn').addEventListener('click', () => {
+    const n = nowIndex();
+    setActive(n.idx, { scroll: true });
+    toast(n.isDay ? 'いまの予定を表示しました' : '旅行の日ではないので、時刻だけで合わせました');
+  });
+
+  // 旅行の当日に開いたら、はじめから今の予定を出す
+  const n = nowIndex();
+  if (n.isDay) setActive(n.idx, { scroll: true, fly: false }), focus(n.idx);
+  else setActive(0, { fly: false });
+}
+main();
+</script>
+</body>
+</html>
