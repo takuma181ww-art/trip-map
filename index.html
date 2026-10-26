@@ -145,8 +145,9 @@
   .card.move .time { font-size: 16px; color: var(--sub); }
   /* 行き方の手順はふつうの文と同じく左寄せで読む。短いメモは中央のまま */
   .card.move .move-memo { flex: 0 1 auto; margin-top: 8px; color: var(--sub); font-size: 13px; }
-  .card.move .btns { align-self: stretch; flex-wrap: wrap; }
-  .card.move .btns a { flex: 1 1 auto !important; padding: 8px 10px; font-size: 13px; }
+  .card.move .btns { align-self: stretch; gap: 6px; }
+  .card.move .btns a { flex: 1 1 0 !important; min-width: 0; padding: 7px 4px; font-size: 12px; overflow-wrap: anywhere; }
+  .card.move .btns a small { display: block; font-size: 10px; font-weight: 600; opacity: .85; }
   .card.move .move-memo:has(ol) { align-self: stretch; text-align: left; color: var(--text); font-size: 14px; }
 
   #toast {
@@ -226,7 +227,7 @@ function cardHtml(it, i) {
       <div class="time">${hm(it.time)} → ${hm(it.end)}</div>
       ${it.memo ? `<div class="memo move-memo">${memoHtml(it.memo)}</div>` : ''}
       ${it.stations ? `<div class="btns">${it.stations.map((st, j) =>
-        `<a class="btn-naver" href="#" data-station="${i},${j}">${esc(st.name)}${st.role ? '(' + esc(st.role) + ')' : ''}</a>`).join('')}</div>` : ''}
+        `<a class="btn-naver" href="#" data-station="${i},${j}">${esc(st.name)}${st.role ? `<small>${esc(st.role)}</small>` : ''}</a>`).join('')}</div>` : ''}
     </article>`;
   }
   const hasPlace = it.lat != null;
