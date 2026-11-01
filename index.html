@@ -202,6 +202,8 @@
 // ?day=day2 で開くとその日。つけずに開くと、旅行の当日ならその日、ほかは1日目。
 const DAY_PARAM = new URLSearchParams(location.search).get('day');
 let DAY = DAY_PARAM || 'day1';
+// 上の日付ボタンで選んだ日(アプリを開いている間だけ覚える)と、最後に見た日
+const store = (kind, key, val) => { try { const s = window[kind]; if (val === undefined) return s.getItem(key); s.setItem(key, val); } catch (e) { return null; } };
 const CIRCLED = ['', '①','②','③','④','⑤','⑥','⑦','⑧','⑨','⑩','⑪','⑫','⑬','⑭','⑮','⑯','⑰','⑱','⑲','⑳'];
 
 let data, items = [], markers = {}, stationLayers = {}, active = -1, map;
@@ -449,7 +451,13 @@ function nowIndex() {
 
 async function main() {
   const days = await loadDays();
-  if (!DAY_PARAM) DAY = (days.find(d => d.data.date === todayStr()) || days[0] || { id: 'day1' }).id;
+  // 旅行の当日は、どのリンクから開いても今日の日を出す(日付ボタンで選び直した時だけ、その日)。
+  // ほかの日は、URL の日 → 最後に見た日 → 1日目の順。
+  const todayDay = days.find(d => d.data.date === todayStr());
+  const picked = store('sessionStorage', 'trip-pick');
+  if (todayDay && !(DAY_PARAM && picked === DAY_PARAM)) DAY = todayDay.id;
+  else if (!DAY_PARAM) DAY = (days.find(d => d.id === store('localStorage', 'trip-last')) || days[0] || { id: 'day1' }).id;
+  store('localStorage', 'trip-last', DAY);
   try {
     data = days.find(d => d.id === DAY)?.data;
     if (!data) {
@@ -470,6 +478,8 @@ async function main() {
   document.title = data.title + ' マップ';
   $('#days').innerHTML = daysHtml(days);
   $('#days .on')?.scrollIntoView({ inline: 'center', block: 'nearest' });
+  document.querySelectorAll('#days a').forEach(a => a.addEventListener('click', () =>
+    store('sessionStorage', 'trip-pick', new URLSearchParams(a.search).get('day'))));
 
   map = L.map('map', { zoomControl: false, attributionControl: true });
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
