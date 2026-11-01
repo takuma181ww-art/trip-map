@@ -150,6 +150,18 @@
   .card.move .btns a small { display: block; font-size: 10px; font-weight: 600; opacity: .85; }
   .card.move .move-memo:has(ol) { align-self: stretch; text-align: left; color: var(--text); font-size: 14px; }
 
+  /* 予定どおりに動けなかった時、カードを「今」にして後ろの予定をずらす(旅行の当日だけ出る) */
+  .shift-btn {
+    margin-left: auto; border: 1px solid var(--line); background: var(--chip); color: var(--text);
+    border-radius: 999px; padding: 6px 10px; font-family: inherit; font-size: 12px; font-weight: 700; line-height: 1;
+  }
+  .card.move .shift-btn { margin: 8px 0 0; }
+  .was { font-size: 12px; font-weight: 600; color: var(--sub); margin-left: 6px; }
+  #shiftBar {
+    flex: 1 0 100%; border: 0; border-radius: 10px; padding: 8px 12px; text-align: left;
+    background: var(--chip); color: var(--text); font-family: inherit; font-size: 13px; font-weight: 600; line-height: 1.3;
+  }
+  #shiftBar b { color: var(--accent); }
   #toast {
     position: fixed; left: 50%; top: calc(env(safe-area-inset-top) + 60px); transform: translateX(-50%);
     background: rgba(30,30,32,.92); color: #fff; padding: 8px 14px; border-radius: 10px;
@@ -165,6 +177,7 @@
   <h1 id="title">読みこみ中…</h1>
   <button class="now-btn" id="nowBtn" type="button">今ここ</button>
   <nav id="days" aria-label="日の切りかえ"></nav>
+  <button id="shiftBar" type="button" hidden></button>
 </header>
 <div id="map" role="region" aria-label="地図"></div>
 <div id="panel">
@@ -183,6 +196,7 @@ let DAY = DAY_PARAM || 'day1';
 const CIRCLED = ['', '①','②','③','④','⑤','⑥','⑦','⑧','⑨','⑩','⑪','⑫','⑬','⑭','⑮','⑯','⑰','⑱','⑲','⑳'];
 
 let data, items = [], markers = {}, stationLayers = {}, active = -1, map;
+let offsets = [];  // 予定から何分ずらしたか(カードごと)
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -224,7 +238,8 @@ function cardHtml(it, i) {
     return `<article class="card move" role="listitem" data-i="${i}">
       <div class="plane" aria-hidden="true">${esc(it.icon || '✈︎')}</div>
       <div class="name">${esc(it.name)}</div>
-      <div class="time">${hm(it.time)} → ${hm(it.end)}</div>
+      <div class="time">${hm(it.time)} → ${hm(it.end)}${wasHtml(i)}</div>
+      ${shiftBtn(i, '今ここを出る')}
       ${it.memo ? `<div class="memo move-memo">${memoHtml(it.memo)}</div>` : ''}
       ${it.stations ? `<div class="btns">${it.stations.map((st, j) =>
         `<a class="btn-naver" href="#" data-station="${i},${j}">${esc(st.name)}${st.role ? `<small>${esc(st.role)}</small>` : ''}</a>`).join('')}</div>` : ''}
@@ -242,7 +257,8 @@ function cardHtml(it, i) {
   return `<article class="card" role="listitem" data-i="${i}">
     <div class="card-head">
       <div class="num ${hasPlace ? '' : 'plain'}">${it.no ?? ''}</div>
-      <div class="time">${hm(it.time)}</div>
+      <div class="time">${hm(it.time)}${wasHtml(i)}</div>
+      ${shiftBtn(i, 'ここを今にする')}
     </div>
     <div class="name">${esc(it.name)}</div>
     <div class="memo">${memoHtml(it.memo)}</div>
@@ -250,6 +266,58 @@ function cardHtml(it, i) {
     ${it.note ? `<div class="note">${esc(it.note)}</div>` : ''}
     ${btns ? `<div class="btns">${btns}</div>` : ''}
   </article>`;
+}
+
+// ---- 予定のずらし ----
+const toMin = t => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
+const toHM = m => { m = ((m % 1440) + 1440) % 1440; return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); };
+const nowMin = () => { const l = new Date(Date.now() + 9 * 3600000); return l.getUTCHours() * 60 + l.getUTCMinutes(); };
+const isTripDay = () => data && data.date === todayStr();
+const shiftKey = () => 'trip-shift:' + data.date;
+
+function shiftBtn(i, label) {
+  return isTripDay() ? `<button class="shift-btn" type="button" data-shift="${i}">${label}</button>` : '';
+}
+function wasHtml(i) {
+  return offsets[i] ? `<span class="was">予定 ${hm(items[i].t0)}</span>` : '';
+}
+function applyOffsets() {
+  items.forEach((it, i) => {
+    const d = offsets[i] || 0;
+    it.time = toHM(toMin(it.t0) + d);
+    if (it.e0) it.end = toHM(toMin(it.e0) + d);
+  });
+  const last = offsets.findLast ? offsets.findLast(Boolean) : [...offsets].reverse().find(Boolean);
+  const bar = $('#shiftBar');
+  if (last) {
+    bar.innerHTML = `⏱ 予定を<b>${last > 0 ? '+' : ''}${last}分</b>ずらしています ・ タップで元に戻す`;
+    bar.hidden = false;
+  } else bar.hidden = true;
+}
+function saveOffsets() {
+  try { localStorage.setItem(shiftKey(), JSON.stringify(offsets)); } catch (e) {}
+}
+function loadOffsets() {
+  try { const v = JSON.parse(localStorage.getItem(shiftKey()) || '[]'); if (Array.isArray(v)) offsets = v; } catch (e) {}
+}
+// i 番目のカードを今の時刻にして、それより後ろも同じだけずらす(5分単位)
+function shiftFrom(i) {
+  const d = Math.round((nowMin() - toMin(items[i].t0)) / 5) * 5;
+  for (let j = i; j < items.length; j++) offsets[j] = d;
+  saveOffsets(); applyOffsets(); renderCards();
+  active = -1; setActive(i, { scroll: true, fly: false });
+  toast(d === 0 ? '予定どおりです' : `ここから後ろを ${d > 0 ? '+' : ''}${d}分 ずらしました`);
+}
+
+function renderCards() {
+  $('#cards').innerHTML = items.map(cardHtml).join('');
+  document.querySelectorAll('[data-naver]').forEach(a =>
+    a.addEventListener('click', e => openNaver(items[+a.dataset.naver], e)));
+  document.querySelectorAll('[data-station]').forEach(a => a.addEventListener('click', e => {
+    const [i, j] = a.dataset.station.split(',').map(Number);
+    openNaver(items[i].stations[j], e);
+  }));
+  document.querySelectorAll('[data-shift]').forEach(b => b.addEventListener('click', () => shiftFrom(+b.dataset.shift)));
 }
 
 function places() { return items.filter(it => it.lat != null); }
@@ -353,6 +421,8 @@ async function main() {
     return;
   }
   items = data.items;
+  items.forEach(it => { it.t0 = it.time; it.e0 = it.end; });
+  if (isTripDay()) { loadOffsets(); applyOffsets(); }
   const [, mo, d] = data.date.split('-').map(Number);
   $('#title').innerHTML = esc(data.title) + `<small>${mo}/${d}(${esc(data.weekday || '')})</small>`;
   document.title = data.title + ' マップ';
@@ -398,14 +468,14 @@ async function main() {
     markers[i] = m;
   });
 
-  $('#cards').innerHTML = items.map(cardHtml).join('');
+  renderCards();
   $('#dots').innerHTML = items.map(() => '<span></span>').join('');
-  document.querySelectorAll('[data-naver]').forEach(a =>
-    a.addEventListener('click', e => openNaver(items[+a.dataset.naver], e)));
-  document.querySelectorAll('[data-station]').forEach(a => a.addEventListener('click', e => {
-    const [i, j] = a.dataset.station.split(',').map(Number);
-    openNaver(items[i].stations[j], e);
-  }));
+  $('#shiftBar').addEventListener('click', () => {
+    if (!confirm('ずらした時刻を元の予定に戻しますか?')) return;
+    offsets = []; saveOffsets(); applyOffsets(); renderCards();
+    const i = active; active = -1; setActive(i, { scroll: true, fly: false });
+    toast('元の予定に戻しました');
+  });
 
   // スワイプが止まったら、いちばん左に来たカードを選ぶ
   const box = $('#cards');
