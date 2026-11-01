@@ -249,7 +249,7 @@ function cardHtml(it, i) {
       <div class="plane" aria-hidden="true">${esc(it.icon || '✈︎')}</div>
       <div class="name">${esc(it.name)}</div>
       <div class="time">${hm(it.time)} → ${hm(it.end)}${wasHtml(i)}</div>
-      ${shiftBtn(i, '今ここを出る')}
+      ${shiftBtn(i, 'ここから再開')}
       ${it.memo ? `<div class="memo move-memo">${memoHtml(it.memo)}</div>` : ''}
       ${it.stations ? `<div class="btns">${it.stations.map((st, j) =>
         `<a class="btn-naver" href="#" data-station="${i},${j}">${esc(st.name)}${st.role ? `<small>${esc(st.role)}</small>` : ''}</a>`).join('')}</div>` : ''}
@@ -268,7 +268,7 @@ function cardHtml(it, i) {
     <div class="card-head">
       <div class="num ${hasPlace ? '' : 'plain'}">${it.no ?? ''}</div>
       <div class="time">${hm(it.time)}${wasHtml(i)}</div>
-      ${shiftBtn(i, 'ここを今にする')}
+      ${shiftBtn(i, 'ここから再開')}
     </div>
     <div class="name">${esc(it.name)}</div>
     <div class="memo">${memoHtml(it.memo)}</div>
