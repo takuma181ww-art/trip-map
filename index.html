@@ -81,6 +81,15 @@
   }
   .pin.on { background: var(--accent); color: #fff; transform: scale(1.35); }
   .leaflet-marker-icon.on-top { z-index: 9999 !important; }
+  /* 自分の位置(GPS)。青い点と、位置のずれの目安の円 */
+  .me-dot {
+    width: 16px; height: 16px; border-radius: 50%; background: #1a73e8;
+    border: 3px solid #fff; box-shadow: 0 0 0 2px rgba(26,115,232,.35), 0 1px 4px rgba(0,0,0,.4);
+  }
+  .locate-btn {
+    width: 40px; height: 40px; border-radius: 50%; border: 0; background: var(--card); color: var(--text);
+    box-shadow: 0 2px 8px rgba(0,0,0,.3); font-size: 18px; line-height: 40px; text-align: center; padding: 0;
+  }
   /* 乗り降りする駅(その移動カードを選んだ時だけ出る) */
   .station {
     position: absolute; transform: translate(-50%, calc(-100% - 18px)); white-space: nowrap;
@@ -196,7 +205,8 @@ let DAY = DAY_PARAM || 'day1';
 const CIRCLED = ['', '①','②','③','④','⑤','⑥','⑦','⑧','⑨','⑩','⑪','⑫','⑬','⑭','⑮','⑯','⑰','⑱','⑲','⑳'];
 
 let data, items = [], markers = {}, stationLayers = {}, active = -1, map;
-let offsets = [];  // 予定から何分ずらしたか(カードごと)
+let offsets = [];
+let me = null, meMarker = null, meCircle = null, watching = false;  // 自分の位置(GPS)  // 予定から何分ずらしたか(カードごと)
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -307,6 +317,38 @@ function shiftFrom(i) {
   saveOffsets(); applyOffsets(); renderCards();
   active = -1; setActive(i, { scroll: true, fly: false });
   toast(d === 0 ? '予定どおりです' : `ここから後ろを ${d > 0 ? '+' : ''}${d}分 ずらしました`);
+}
+
+// ---- 自分の位置(GPS) ----
+function startWatch() {
+  if (watching || !('geolocation' in navigator)) return;
+  watching = true;
+  navigator.geolocation.watchPosition(pos => {
+    me = [pos.coords.latitude, pos.coords.longitude];
+    const acc = Math.min(pos.coords.accuracy || 0, 500);
+    if (!meMarker) {
+      meCircle = L.circle(me, { radius: acc, color: '#1a73e8', weight: 1, opacity: .4, fillOpacity: .12, interactive: false }).addTo(map);
+      meMarker = L.marker(me, { icon: L.divIcon({ className: '', html: '<div class="me-dot"></div>', iconSize: [22, 22], iconAnchor: [11, 11] }),
+        zIndexOffset: 2000, keyboard: false, title: '現在地' }).addTo(map);
+    } else { meMarker.setLatLng(me); meCircle.setLatLng(me).setRadius(acc); }
+  }, err => {
+    watching = false;
+    if (err.code === 1) toast('位置情報が許可されていません(設定 → プライバシー → 位置情報 で Safari を許可)');
+  }, { enableHighAccuracy: true, maximumAge: 10000, timeout: 20000 });
+}
+function addLocateButton() {
+  const Ctl = L.Control.extend({ options: { position: 'topright' }, onAdd() {
+    const b = L.DomUtil.create('button', 'locate-btn');
+    b.type = 'button'; b.title = '現在地へ'; b.setAttribute('aria-label', '現在地へ'); b.textContent = '📍';
+    L.DomEvent.disableClickPropagation(b);
+    b.addEventListener('click', () => {
+      startWatch();
+      if (me) map.flyTo(me, Math.max(map.getZoom(), 16), { duration: .8 });
+      else toast('現在地を探しています…');
+    });
+    return b;
+  } });
+  new Ctl().addTo(map);
 }
 
 function renderCards() {
@@ -435,6 +477,8 @@ async function main() {
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
   }).addTo(map);
   map.fitBounds(allBounds(), { padding: [30, 30] });
+  addLocateButton();
+  if (isTripDay()) startWatch();  // 旅行の当日は開いた時から自分の位置を出す
 
   // スポットを順番に線で結ぶ。移動の区間は点線にし、乗り降りする駅があれば駅を通す。
   let prev = null, dashed = false, via = [];
