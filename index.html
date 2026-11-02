@@ -171,6 +171,42 @@
     background: var(--chip); color: var(--text); font-family: inherit; font-size: 13px; font-weight: 600; line-height: 1.3;
   }
   #shiftBar b { color: var(--accent); }
+  /* 行けた・行けなかった(場所のある予定だけ)。GPSで近くに来たら自動で「行けた」 */
+  .visit { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 13px; }
+  .visit button {
+    border: 1px solid var(--line); background: var(--chip); color: var(--text); border-radius: 999px;
+    padding: 5px 10px; font-family: inherit; font-size: 12px; font-weight: 700; line-height: 1;
+  }
+  .visit button.on-done { background: #2f9e44; border-color: #2f9e44; color: #fff; }
+  .visit button.on-skip { background: var(--sub); border-color: var(--sub); color: var(--bg); }
+  .visit small { color: var(--sub); }
+  .pin.done { border-color: #2f9e44; color: #2f9e44; }
+  .pin.done.on { background: #2f9e44; color: #fff; }
+  .pin.skip { opacity: .45; }
+  #visitBar {
+    flex: 1 0 100%; border: 0; border-radius: 10px; padding: 8px 12px; text-align: left;
+    background: var(--chip); color: var(--text); font-family: inherit; font-size: 13px; font-weight: 600; line-height: 1.3;
+  }
+  #visitBar b { color: #2f9e44; }
+  #visitSheet {
+    position: fixed; inset: 0; z-index: 3000; background: rgba(0,0,0,.45); display: flex; align-items: flex-end;
+  }
+  #visitSheet[hidden] { display: none; }
+  #visitSheet .sheet {
+    width: 100%; max-height: 80dvh; overflow-y: auto; background: var(--bg); border-radius: 16px 16px 0 0;
+    padding: 16px 16px calc(env(safe-area-inset-bottom) + 16px);
+  }
+  #visitSheet h2 { font-size: 17px; margin: 0 0 8px; }
+  #visitSheet h3 { font-size: 14px; margin: 14px 0 4px; color: var(--sub); }
+  #visitSheet ul { margin: 0; padding: 0; list-style: none; }
+  #visitSheet li { padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 14px; display: flex; gap: 8px; }
+  #visitSheet li span:first-child { flex: 0 0 auto; width: 1.4em; text-align: center; }
+  #visitSheet .row { display: flex; gap: 8px; margin-top: 14px; }
+  #visitSheet .row button {
+    flex: 1; border: 0; border-radius: 10px; padding: 11px; font-family: inherit; font-size: 14px; font-weight: 700;
+    background: var(--chip); color: var(--text);
+  }
+  #visitSheet .row button.main { background: var(--accent); color: #fff; }
   #toast {
     position: fixed; left: 50%; top: calc(env(safe-area-inset-top) + 60px); transform: translateX(-50%);
     background: rgba(30,30,32,.92); color: #fff; padding: 8px 14px; border-radius: 10px;
@@ -187,6 +223,7 @@
   <button class="now-btn" id="nowBtn" type="button">今ここ</button>
   <nav id="days" aria-label="日の切りかえ"></nav>
   <button id="shiftBar" type="button" hidden></button>
+  <button id="visitBar" type="button" hidden></button>
 </header>
 <div id="map" role="region" aria-label="地図"></div>
 <div id="panel">
@@ -194,6 +231,7 @@
   <div id="cards" role="list"></div>
 </div>
 <div id="toast" role="status"></div>
+<div id="visitSheet" hidden><div class="sheet" role="dialog" aria-label="行けた場所・行けなかった場所"></div></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"
         integrity="sha384-NElt3Op+9NBMCYaef5HxeJmU4Xeard/Lku8ek6hoPTvYkQPh3zLIrJP7KiRocsxO" crossorigin="anonymous"></script>
@@ -208,7 +246,8 @@ const CIRCLED = ['', '①','②','③','④','⑤','⑥','⑦','⑧','⑨','⑩'
 
 let data, items = [], markers = {}, stationLayers = {}, active = -1, map;
 let offsets = [];
-let me = null, meMarker = null, meCircle = null, watching = false;  // 自分の位置(GPS)  // 予定から何分ずらしたか(カードごと)
+let me = null, meMarker = null, meCircle = null, watching = false;  // 自分の位置(GPS)
+let allDays = [];
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -276,8 +315,85 @@ function cardHtml(it, i) {
     <div class="memo">${memoHtml(it.memo)}</div>
     ${hasPlace ? '' : '<div class="note">地図の印はありません</div>'}
     ${it.note ? `<div class="note">${esc(it.note)}</div>` : ''}
+    ${visitHtml(it, i)}
     ${btns ? `<div class="btns">${btns}</div>` : ''}
   </article>`;
+}
+
+// ---- 行けた・行けなかった ----
+// 記録はその端末だけ(localStorage)。日付と予定の名前で覚えるので、カードの順番が変わってもずれない。
+const VISIT_KEY = 'trip-visits';
+const VISIT_NEAR_M = 150;
+function loadVisits() { try { return JSON.parse(localStorage.getItem(VISIT_KEY) || '{}') || {}; } catch (e) { return {}; } }
+function saveVisits(v) { try { localStorage.setItem(VISIT_KEY, JSON.stringify(v)); } catch (e) {} }
+const visitId = (date, it) => date + '|' + it.name;
+const isPlace = it => it.type !== 'move' && it.lat != null;
+function visitOf(it, date = data.date) { return loadVisits()[visitId(date, it)]; }
+function visitHtml(it, i) {
+  if (!isPlace(it)) return '';
+  const v = visitOf(it);
+  const note = v ? `<small>${v.s === 'done' ? `${esc(v.t || '')}${v.auto ? '(自動)' : ''}` : ''}</small>` : '';
+  return `<div class="visit">
+    <button type="button" data-visit="${i}:done" class="${v?.s === 'done' ? 'on-done' : ''}">✓ 行けた</button>
+    <button type="button" data-visit="${i}:skip" class="${v?.s === 'skip' ? 'on-skip' : ''}">行けなかった</button>
+    ${note}
+  </div>`;
+}
+function setVisit(i, s, auto = false) {
+  const it = items[i], v = loadVisits(), id = visitId(data.date, it);
+  if (!auto && v[id]?.s === s) delete v[id];  // 同じボタンをもう一度押すと消す
+  else v[id] = { s, t: toHM(nowMin()), auto };
+  saveVisits(v); refreshVisits();
+}
+function refreshVisits() {
+  const keep = active;
+  renderCards(); active = -1; setActive(keep, { fly: false });
+  items.forEach((it, i) => {
+    const el = markers[i]?.getElement()?.querySelector('.pin');
+    if (!el) return;
+    const v = visitOf(it);
+    el.classList.toggle('done', v?.s === 'done'); el.classList.toggle('skip', v?.s === 'skip');
+  });
+  const all = allDays.flatMap(d => d.data.items.filter(isPlace).map(it => visitOf(it, d.data.date)));
+  const done = all.filter(v => v?.s === 'done').length, skip = all.filter(v => v?.s === 'skip').length;
+  const bar = $('#visitBar');
+  bar.hidden = !(done || skip);
+  bar.innerHTML = `📍 行けた <b>${done}</b> ・ 行けなかった ${skip} ・ まだ ${all.length - done - skip} <small>(タップで一覧)</small>`;
+}
+// GPS が予定の場所から 150m 以内に入ったら、旅行の当日だけ自動で「行けた」にする
+function autoVisit(pos) {
+  if (!isTripDay() || (pos.coords.accuracy || 0) > 200) return;
+  // 近くに予定が2つある時は、いちばん近い1つだけ(それがもう記録済みなら何もしない)
+  let best = -1, bestD = VISIT_NEAR_M;
+  items.forEach((it, i) => {
+    if (!isPlace(it)) return;
+    const d = map.distance(me, [it.lat, it.lng]);
+    if (d <= bestD) { best = i; bestD = d; }
+  });
+  if (best < 0 || visitOf(items[best])) return;
+  setVisit(best, 'done', true);
+  toast(`「${items[best].name}」に着いたので、行けたに記録しました`);
+}
+function visitListText() {
+  return allDays.map(d => {
+    const rows = d.data.items.filter(isPlace).map(it => {
+      const v = visitOf(it, d.data.date);
+      return (v?.s === 'done' ? '✓ ' : v?.s === 'skip' ? '✗ ' : '・ ') + it.name + (v?.s === 'done' && v.t ? `(${v.t})` : '');
+    });
+    return `${d.data.title}(${d.data.date})\n${rows.join('\n')}`;
+  }).join('\n\n');
+}
+function openVisitSheet() {
+  const box = $('#visitSheet .sheet');
+  box.innerHTML = '<h2>行けた場所・行けなかった場所</h2>' + allDays.map(d => {
+    const rows = d.data.items.filter(isPlace).map(it => {
+      const v = visitOf(it, d.data.date);
+      const mark = v?.s === 'done' ? '✓' : v?.s === 'skip' ? '✗' : '・';
+      return `<li><span>${mark}</span><span>${esc(it.name)}${v?.s === 'done' && v.t ? ` <small>${esc(v.t)}</small>` : ''}</span></li>`;
+    }).join('');
+    return `<h3>${esc(d.data.title)}</h3><ul>${rows}</ul>`;
+  }).join('') + `<div class="row"><button type="button" class="main" data-act="copy">一覧をコピー</button><button type="button" data-act="close">閉じる</button></div>`;
+  $('#visitSheet').hidden = false;
 }
 
 // ---- 予定のずらし ----
@@ -333,6 +449,7 @@ function startWatch() {
       meMarker = L.marker(me, { icon: L.divIcon({ className: '', html: '<div class="me-dot"></div>', iconSize: [22, 22], iconAnchor: [11, 11] }),
         zIndexOffset: 2000, keyboard: false, title: '現在地' }).addTo(map);
     } else { meMarker.setLatLng(me); meCircle.setLatLng(me).setRadius(acc); }
+    autoVisit(pos);
   }, err => {
     watching = false;
     if (err.code === 1) toast('位置情報が許可されていません(設定 → プライバシー → 位置情報 で Safari を許可)');
@@ -362,6 +479,9 @@ function renderCards() {
     openNaver(items[i].stations[j], e);
   }));
   document.querySelectorAll('[data-shift]').forEach(b => b.addEventListener('click', () => shiftFrom(+b.dataset.shift)));
+  document.querySelectorAll('[data-visit]').forEach(b => b.addEventListener('click', () => {
+    const [i, s] = b.dataset.visit.split(':'); setVisit(+i, s);
+  }));
 }
 
 function places() { return items.filter(it => it.lat != null); }
@@ -451,6 +571,7 @@ function nowIndex() {
 
 async function main() {
   const days = await loadDays();
+  allDays = days;
   // 旅行の当日は、どのリンクから開いても今日の日を出す(日付ボタンで選び直した時だけ、その日)。
   // ほかの日は、URL の日 → 最後に見た日 → 1日目の順。
   const todayDay = days.find(d => d.data.date === todayStr());
@@ -524,6 +645,16 @@ async function main() {
 
   renderCards();
   $('#dots').innerHTML = items.map(() => '<span></span>').join('');
+  refreshVisits();
+  $('#visitBar').addEventListener('click', openVisitSheet);
+  $('#visitSheet').addEventListener('click', async e => {
+    const act = e.target.dataset?.act;
+    if (e.target.id === 'visitSheet' || act === 'close') { $('#visitSheet').hidden = true; return; }
+    if (act === 'copy') {
+      try { await navigator.clipboard.writeText(visitListText()); toast('コピーしました。Claude に貼ればリストに反映できます'); }
+      catch (err) { toast('コピーできませんでした'); }
+    }
+  });
   $('#shiftBar').addEventListener('click', () => {
     if (!confirm('ずらした時刻を元の予定に戻しますか?')) return;
     offsets = []; saveOffsets(); applyOffsets(); renderCards();
