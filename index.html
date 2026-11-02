@@ -171,6 +171,18 @@
     background: var(--chip); color: var(--text); font-family: inherit; font-size: 13px; font-weight: 600; line-height: 1.3;
   }
   #shiftBar b { color: var(--accent); }
+  /* ここへ行く(徒歩・電車・タクシーの目安と、NAVER の経路を開くボタン) */
+  .go { margin-top: 6px; }
+  .go-label { font-size: 12px; color: var(--sub); margin-bottom: 3px; }
+  .go-btns { display: flex; gap: 6px; }
+  .go-btns a {
+    flex: 1; text-align: center; text-decoration: none; border-radius: 999px; padding: 6px 4px;
+    background: var(--chip); color: var(--text); font-size: 13px; font-weight: 700; line-height: 1.2;
+    border: 1.5px solid transparent; white-space: nowrap;
+  }
+  .go-btns a small { font-size: 12px; font-weight: 600; color: var(--sub); }
+  .go-btns a.best { border-color: var(--naver); }
+  .go-btns a.best small { color: var(--naver); }
   /* 行けた・行けなかった(場所のある予定だけ)。GPSで近くに来たら自動で「行けた」 */
   .visit { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 13px; }
   .visit button {
@@ -261,6 +273,60 @@ function toast(msg) {
 
 // NAVER はアプリを直接開くのがいちばん確実(座標で場所を指せる)。
 // アプリが入っていない時は 1.5 秒後にサイトの検索へ切り替える。
+// ---- ここへ行く ----
+// 目安の時間は、出発地(GPS の現在地、なければ1つ前の予定)からの直線距離で出す。
+// 押すと NAVER の経路を、その移動手段で開く(出発地は NAVER 側で現在地になる)。
+const GO_MODES = [
+  { key: 'walk', icon: '🚶', name: '徒歩', mins: d => Math.round(d * 1.3 / 75) },
+  { key: 'public', icon: '🚇', name: '電車・バス', mins: d => Math.round(8 + d * 1.3 / 450) },
+  { key: 'car', icon: '🚕', name: 'タクシー', mins: d => Math.round(3 + d * 1.4 / 350) }
+];
+function goOrigin(i) {
+  if (me) return { pt: me, label: '現在地から' };
+  const prev = neighbor(i, -1);
+  return prev ? { pt: [prev.lat, prev.lng], label: `「${prev.name}」から` } : null;
+}
+// 1.2km までは徒歩、15km までは電車・バス(ソウルは地下鉄が速くて安い)、それより遠ければタクシー
+function bestMode(d) { return d <= 1200 ? 'walk' : d <= 15000 ? 'public' : 'car'; }
+function goHtml(it, i) {
+  if (!isPlace(it) || it.country !== 'kr') return '';
+  return `<div class="go" data-go="${i}">
+    <div class="go-label">ここへ行く</div>
+    <div class="go-btns">${GO_MODES.map(m =>
+      `<a href="#" data-route="${i}:${m.key}" aria-label="${m.name}の経路をNAVERで開く">${m.icon} <small data-mins="${m.key}">${m.name}</small></a>`).join('')}</div>
+  </div>`;
+}
+// カードの目安の時間を、今の出発地で書き直す(GPS が動くたびにも呼ぶ)
+function updateGoTimes() {
+  document.querySelectorAll('[data-go]').forEach(box => {
+    const i = +box.dataset.go, it = items[i], o = goOrigin(i);
+    if (!o) return;
+    const d = map.distance(o.pt, [it.lat, it.lng]), best = bestMode(d);
+    const dist = d < 50 ? 'すぐ近く' : '約' + (d < 1000 ? Math.round(d / 10) * 10 + 'm' : (d / 1000).toFixed(1) + 'km');
+    const name = GO_MODES.find(m => m.key === best).name;
+    box.querySelector('.go-label').textContent = `ここへ行く:${o.label} ${dist}・おすすめは${name}(時間は目安)`;
+    GO_MODES.forEach(m => {
+      const a = box.querySelector(`[data-route="${i}:${m.key}"]`);
+      a.classList.toggle('best', m.key === best);
+      a.querySelector('small').textContent = `${Math.max(1, m.mins(d))}分`;
+    });
+  });
+}
+function routeUrl(i, mode) {
+  const it = items[i];
+  return `nmap://route/${mode}?dlat=${it.lat}&dlng=${it.lng}&dname=${encodeURIComponent(it.kr || it.name)}` +
+         '&appname=' + encodeURIComponent(location.hostname || 'trip-map');
+}
+function openRoute(i, mode, e) {
+  e.preventDefault();
+  const it = items[i];
+  const app = routeUrl(i, mode);
+  const web = 'https://map.naver.com/p/search/' + encodeURIComponent(it.kr || it.name);
+  const t = setTimeout(() => { if (!document.hidden) location.href = web; }, 1500);
+  document.addEventListener('visibilitychange', () => clearTimeout(t), { once: true });
+  location.href = app;
+}
+
 function openNaver(it, e) {
   e.preventDefault();
   const app = 'nmap://place?lat=' + it.lat + '&lng=' + it.lng +
@@ -315,6 +381,7 @@ function cardHtml(it, i) {
     <div class="memo">${memoHtml(it.memo)}</div>
     ${hasPlace ? '' : '<div class="note">地図の印はありません</div>'}
     ${it.note ? `<div class="note">${esc(it.note)}</div>` : ''}
+    ${goHtml(it, i)}
     ${visitHtml(it, i)}
     ${btns ? `<div class="btns">${btns}</div>` : ''}
   </article>`;
@@ -450,6 +517,7 @@ function startWatch() {
         zIndexOffset: 2000, keyboard: false, title: '現在地' }).addTo(map);
     } else { meMarker.setLatLng(me); meCircle.setLatLng(me).setRadius(acc); }
     autoVisit(pos);
+    if (!updateGoTimes.t) updateGoTimes.t = setTimeout(() => { updateGoTimes.t = 0; updateGoTimes(); }, 3000);
   }, err => {
     watching = false;
     if (err.code === 1) toast('位置情報が許可されていません(設定 → プライバシー → 位置情報 で Safari を許可)');
@@ -479,6 +547,10 @@ function renderCards() {
     openNaver(items[i].stations[j], e);
   }));
   document.querySelectorAll('[data-shift]').forEach(b => b.addEventListener('click', () => shiftFrom(+b.dataset.shift)));
+  document.querySelectorAll('[data-route]').forEach(a => a.addEventListener('click', e => {
+    const [i, mode] = a.dataset.route.split(':'); openRoute(+i, mode, e);
+  }));
+  updateGoTimes();
   document.querySelectorAll('[data-visit]').forEach(b => b.addEventListener('click', () => {
     const [i, s] = b.dataset.visit.split(':'); setVisit(+i, s);
   }));
