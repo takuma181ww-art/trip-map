@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>トラベルリスト</title>
+<!-- ホーム画面の「トラベルリスト」の入り口。押すと本体(claude.ai のドキュメント)を開く。
+     本体はログインした Takuさんしか見られないので、ここには中身を置かない -->
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=1">
+<link rel="icon" type="image/png" href="apple-touch-icon.png?v=1">
+<meta name="apple-mobile-web-app-title" content="トラベルリスト">
+<meta name="theme-color" content="#1d1d1f">
+<style>
+  :root { --bg:#f6f5f2; --text:#1d1d1f; --sub:#6b6b70; --accent:#e8590c; color-scheme: light; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#141416; --text:#f2f2f4; --sub:#a1a1a8; --accent:#ff8a3d; color-scheme: dark; } }
+  body { margin:0; min-height:100dvh; background:var(--bg); color:var(--text);
+         font-family:-apple-system,"Hiragino Sans",sans-serif; display:grid; place-items:center; padding:24px 16px; box-sizing:border-box; }
+  main { max-width:420px; text-align:center; }
+  img { width:96px; height:96px; border-radius:22px; }
+  h1 { font-size:22px; margin:14px 0 6px; }
+  p { color:var(--sub); font-size:14px; line-height:1.6; margin:6px 0; }
+  a.go { display:block; margin:18px 0 10px; padding:14px; border-radius:12px; background:var(--accent); color:#fff; font-weight:700; text-decoration:none; }
+  ol { text-align:left; color:var(--sub); font-size:14px; line-height:1.7; padding-left:1.4em; }
+  [hidden] { display:none; }
+</style>
+</head>
+<body>
+<main>
+  <img src="apple-touch-icon.png?v=1" alt="">
+  <h1>TakuVLOG トラベルリスト</h1>
+  <p id="msg">開いています…</p>
+  <a class="go" id="go" href="https://claude.ai/artifact/HZNGtJLiCRvY4gPHo4CAnL">トラベルリストを開く</a>
+  <div id="setup" hidden>
+    <p>ホーム画面に置くには:</p>
+    <ol>
+      <li>下の共有ボタンを押す</li>
+      <li>「ホーム画面に追加」を押す(名前は「トラベルリスト」)</li>
+      <li>次からはアイコンを押すと、すぐリストが開きます</li>
+    </ol>
+  </div>
+</main>
+<script>
+  // ?setup で開いた時だけ、ホーム画面に置く手順を出して止まる。
+  // そのとき住所から ?setup を消しておくので、ホーム画面には「すぐ開く方」の住所が置かれる。
+  const url = document.getElementById('go').href;
+  if (new URLSearchParams(location.search).has('setup')) {
+    document.getElementById('setup').hidden = false;
+    document.getElementById('msg').textContent = 'このページは、トラベルリストを開く入り口です。';
+    history.replaceState(null, '', location.pathname);
+  } else {
+    location.replace(url);
+  }
+</script>
+</body>
+</html>
