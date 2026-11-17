@@ -1,0 +1,9 @@
+{
+  "name": "トラベラー",
+  "short_name": "トラベラー",
+  "start_url": "./",
+  "display": "browser",
+  "background_color": "#1d1d1f",
+  "theme_color": "#1d1d1f",
+  "icons": [{ "src": "apple-touch-icon.png", "sizes": "180x180", "type": "image/png" }]
+}

@@ -48,7 +48,7 @@
 
 ## そのほか
 
-- ホーム画面のアイコンは `apple-touch-icon.png`(180×180。元の絵は `icon.svg`、TakuVLOG の黄色にピンと飛行機)。名前は「トラベラー」。変えた時は、iPhone のホーム画面のアイコンを消して Safari から「ホーム画面に追加」し直さないと古いまま
+- ホーム画面のアイコンは `apple-touch-icon.png`(180×180。元の絵は `icon.svg`、黒地に TakuVLOG の黄色いピンと白い飛行機。iPhone のダークのホーム画面で明るい地は黒に変えられるので、もともと黒地にしている)。名前は「トラベラー」(`<title>`・`apple-mobile-web-app-title`・`manifest.json` の3か所。iPhone はページの名前を使うことがある)。変えた時は、iPhone のホーム画面のアイコンを消して Safari から「ホーム画面に追加」し直さないと古いまま
 
 - AutoPrep(`~/Movies/AutoPrep/TELOP/place_cards.py`)が Vlog の場所の札をつくる時に `data/` の下の JSON を全部(サブフォルダも)読んでいる。`items` の `name`・`kr`・`googleQuery`・`time` の形は変えない
 
