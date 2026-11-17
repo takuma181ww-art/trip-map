@@ -50,8 +50,22 @@
     padding: calc(env(safe-area-inset-top) + 8px) 16px 8px;
     background: var(--bg); border-bottom: 1px solid var(--line); z-index: 2;
   }
-  header h1 { font-size: 16px; margin: 0; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  header h1 small { color: var(--sub); font-weight: 500; margin-left: 6px; }
+  /* 左上は旅行の切りかえ(旅行の名前のプルダウン) */
+  .trip-pick { position: relative; flex: 1; min-width: 0; }
+  .trip-pick select {
+    -webkit-appearance: none; appearance: none; width: 100%; max-width: 100%;
+    border: 0; border-radius: 10px; background: var(--chip); color: var(--text);
+    font-family: inherit; font-size: 16px; font-weight: 700; line-height: 1.2; padding: 8px 30px 8px 12px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .trip-pick::after {
+    content: '▾'; position: absolute; right: 11px; top: 50%; transform: translateY(-50%);
+    color: var(--sub); font-size: 14px; pointer-events: none;
+  }
+  .add-btn {
+    flex: 0 0 auto; width: 36px; height: 36px; border-radius: 50%; border: 0; padding: 0;
+    background: var(--chip); color: var(--accent); font-family: inherit; font-size: 22px; font-weight: 700; line-height: 36px;
+  }
   .now-btn {
     border: 0; border-radius: 999px; padding: 8px 14px; font-size: 14px; font-weight: 700;
     background: var(--accent); color: #fff; font-family: inherit;
@@ -200,25 +214,41 @@
     background: var(--chip); color: var(--text); font-family: inherit; font-size: 13px; font-weight: 600; line-height: 1.3;
   }
   #visitBar b { color: #2f9e44; }
-  #visitSheet {
+  .sheet-wrap {
     position: fixed; inset: 0; z-index: 3000; background: rgba(0,0,0,.45); display: flex; align-items: flex-end;
   }
-  #visitSheet[hidden] { display: none; }
-  #visitSheet .sheet {
-    width: 100%; max-height: 80dvh; overflow-y: auto; background: var(--bg); border-radius: 16px 16px 0 0;
+  .sheet-wrap[hidden] { display: none; }
+  .sheet-wrap .sheet {
+    width: 100%; max-height: 85dvh; overflow-y: auto; background: var(--bg); border-radius: 16px 16px 0 0;
     padding: 16px 16px calc(env(safe-area-inset-bottom) + 16px);
   }
-  #visitSheet h2 { font-size: 17px; margin: 0 0 8px; }
-  #visitSheet h3 { font-size: 14px; margin: 14px 0 4px; color: var(--sub); }
-  #visitSheet ul { margin: 0; padding: 0; list-style: none; }
-  #visitSheet li { padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 14px; display: flex; gap: 8px; }
-  #visitSheet li span:first-child { flex: 0 0 auto; width: 1.4em; text-align: center; }
-  #visitSheet .row { display: flex; gap: 8px; margin-top: 14px; }
-  #visitSheet .row button {
+  .sheet-wrap h2 { font-size: 17px; margin: 0 0 8px; }
+  .sheet-wrap h3 { font-size: 14px; margin: 14px 0 4px; color: var(--sub); }
+  .sheet-wrap ul { margin: 0; padding: 0; list-style: none; }
+  .sheet-wrap li { padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 14px; display: flex; gap: 8px; }
+  .sheet-wrap li span:first-child { flex: 0 0 auto; width: 1.4em; text-align: center; }
+  .sheet-wrap .row { display: flex; gap: 8px; margin-top: 14px; }
+  .sheet-wrap .row button, .empty-card button {
     flex: 1; border: 0; border-radius: 10px; padding: 11px; font-family: inherit; font-size: 14px; font-weight: 700;
     background: var(--chip); color: var(--text);
   }
-  #visitSheet .row button.main { background: var(--accent); color: #fff; }
+  .sheet-wrap .row button.main, .empty-card button.main { background: var(--accent); color: #fff; }
+  /* 新しい旅行の入力 */
+  .sheet-wrap label { display: block; font-size: 13px; font-weight: 700; color: var(--sub); margin: 10px 0 4px; }
+  .sheet-wrap input, .sheet-wrap textarea {
+    width: 100%; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--text);
+    font-family: inherit; font-size: 16px; padding: 9px 10px;
+  }
+  .sheet-wrap textarea { min-height: 84px; resize: vertical; }
+  .sheet-wrap .dates { display: flex; gap: 8px; }
+  .sheet-wrap .dates > div { flex: 1; min-width: 0; }
+  .sheet-wrap .hint { font-size: 12px; color: var(--sub); margin: 8px 0 0; line-height: 1.5; }
+  /* 予定がまだない旅行・日 */
+  .empty-card { justify-content: center; gap: 8px; }
+  .empty-card .name { margin: 0; }
+  .empty-card p { white-space: pre-line; margin: 0; font-size: 14px; line-height: 1.55; color: var(--sub); }
+  .empty-card .row { display: flex; gap: 8px; margin-top: 6px; }
+  .badge { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 999px; background: var(--chip); color: var(--accent); vertical-align: 2px; }
   #toast {
     position: fixed; left: 50%; top: calc(env(safe-area-inset-top) + 60px); transform: translateX(-50%);
     background: rgba(30,30,32,.92); color: #fff; padding: 8px 14px; border-radius: 10px;
@@ -231,7 +261,8 @@
 </head>
 <body>
 <header>
-  <h1 id="title">読みこみ中…</h1>
+  <div class="trip-pick"><select id="tripSel" aria-label="旅行の切りかえ"><option>読みこみ中…</option></select></div>
+  <button class="add-btn" id="addTrip" type="button" aria-label="新しい旅行を足す" title="新しい旅行を足す">＋</button>
   <button class="now-btn" id="nowBtn" type="button">今ここ</button>
   <nav id="days" aria-label="日の切りかえ"></nav>
   <button id="shiftBar" type="button" hidden></button>
@@ -243,15 +274,35 @@
   <div id="cards" role="list"></div>
 </div>
 <div id="toast" role="status"></div>
-<div id="visitSheet" hidden><div class="sheet" role="dialog" aria-label="行けた場所・行けなかった場所"></div></div>
+<div id="visitSheet" class="sheet-wrap" hidden><div class="sheet" role="dialog" aria-label="行けた場所・行けなかった場所"></div></div>
+<div id="addSheet" class="sheet-wrap" hidden>
+  <form class="sheet" role="dialog" aria-label="新しい旅行を足す" autocomplete="off">
+    <h2>新しい旅行を足す</h2>
+    <label for="fDest">行き先</label>
+    <input id="fDest" placeholder="例: 韓国(ソウル)" maxlength="40">
+    <div class="dates">
+      <div><label for="fStart">1日目</label><input id="fStart" type="date" required></div>
+      <div><label for="fEnd">最後の日</label><input id="fEnd" type="date" required></div>
+    </div>
+    <label for="fName">旅行の名前</label>
+    <input id="fName" placeholder="例: 2027年5月 韓国旅行" maxlength="40" required>
+    <label for="fMemo">行きたい所・やりたいこと(あれば)</label>
+    <textarea id="fMemo" maxlength="2000" placeholder="例: 1日目は聖水のカフェ、2日目は明洞で買い物"></textarea>
+    <p class="hint">この iPhone の中に下書きとしてできます(すぐ見られます)。公開のページに入れるのは、下書きの「Claude に頼む文をコピー」を Claude Code に貼って頼みます。自宅の住所・予約番号・フルネームは書かないでください(ページは誰でも見られます)。</p>
+    <div class="row"><button type="submit" class="main">下書きをつくる</button><button type="button" data-act="close">やめる</button></div>
+  </form>
+</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"
         integrity="sha384-NElt3Op+9NBMCYaef5HxeJmU4Xeard/Lku8ek6hoPTvYkQPh3zLIrJP7KiRocsxO" crossorigin="anonymous"></script>
 <script>
-// data/day1.json, day2.json … を順に読んで、上に日の切りかえを出す。
-// ?day=day2 で開くとその日。つけずに開くと、旅行の当日ならその日、ほかは1日目。
-const DAY_PARAM = new URLSearchParams(location.search).get('day');
+// 旅行の一覧 data/trips.json と、旅行ごとの data/trips/<id>/day1.json, day2.json … を読む。
+// ?trip=<id>&day=day2 で開くとその旅行のその日。前のリンク(?day=day2 だけ)は、ふつうに開いた時と同じ旅行を出す。
+const Q = new URLSearchParams(location.search);
+const TRIP_PARAM = Q.get('trip');
+const DAY_PARAM = Q.get('day');
 let DAY = DAY_PARAM || 'day1';
+let trip = null, trips = [];
 // 上の日付ボタンで選んだ日(アプリを開いている間だけ覚える)と、最後に見た日
 const store = (kind, key, val) => { try { const s = window[kind]; if (val === undefined) return s.getItem(key); s.setItem(key, val); } catch (e) { return null; } };
 const CIRCLED = ['', '①','②','③','④','⑤','⑥','⑦','⑧','⑨','⑩','⑪','⑫','⑬','⑭','⑮','⑯','⑰','⑱','⑲','⑳'];
@@ -539,6 +590,15 @@ function addLocateButton() {
 }
 
 function renderCards() {
+  if (!items.length) {
+    $('#cards').innerHTML = emptyCardHtml(allDays);
+    $('#cards [data-act="del"]')?.addEventListener('click', deleteDraft);
+    $('#cards [data-act="ask"]')?.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(requestText(trip, allDays)); toast('コピーしました。Claude Code に貼って頼んでください'); }
+      catch (err) { toast('コピーできませんでした'); }
+    });
+    return;
+  }
   $('#cards').innerHTML = items.map(cardHtml).join('');
   document.querySelectorAll('[data-naver]').forEach(a =>
     a.addEventListener('click', e => openNaver(items[+a.dataset.naver], e)));
@@ -573,9 +633,14 @@ function focus(i) {
   } else if (it.type === 'move') {
     const pts = [neighbor(i, -1), ...(it.stations || []), neighbor(i, 1)].filter(Boolean).map(p => [p.lat, p.lng]);
     if (pts.length >= 2) map.flyToBounds(pts, { padding: [40, 40], duration: .8 });
-  } else {
+  } else if (places().length) {
     map.flyToBounds(allBounds(), { padding: [30, 30], duration: .8 });
   }
+}
+// 予定の場所がまだない時は、日本と韓国が入るくらいに
+function fitAll() {
+  if (places().length) map.fitBounds(allBounds(), { padding: [30, 30] });
+  else map.setView([36.0, 133.5], 5);
 }
 
 function setActive(i, { scroll = false, fly = true } = {}) {
@@ -603,26 +668,154 @@ function setActive(i, { scroll = false, fly = true } = {}) {
 // 今日の日付(日本・韓国とも +9時間)
 function todayStr() { return new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10); }
 
-// day1, day2 … と、ないファイルに当たるまで読む
-async function loadDays() {
+// ---- 旅行(いくつもためて切りかえる) ----
+// 公開の旅行は data/trips.json。＋で足した旅行は、その端末だけの下書き(localStorage)。
+// 下書きは Claude に頼んで data/ に入ったら(名前と1日目が同じ旅行ができたら)自動で消える。
+const DRAFT_KEY = 'trip-drafts';
+const WEEK = '日月火水木金土';
+const weekdayOf = date => WEEK[new Date(date + 'T00:00:00Z').getUTCDay()];
+const addDays = (date, n) => new Date(Date.parse(date + 'T00:00:00Z') + n * 86400000).toISOString().slice(0, 10);
+function loadDrafts() { try { const v = JSON.parse(localStorage.getItem(DRAFT_KEY) || '[]'); return Array.isArray(v) ? v : []; } catch (e) { return []; } }
+function saveDrafts(v) { try { localStorage.setItem(DRAFT_KEY, JSON.stringify(v)); return true; } catch (e) { return false; } }
+
+async function loadTrips() {
+  let list = [];
+  try {
+    const res = await fetch('data/trips.json', { cache: 'no-cache' });
+    if (res.ok) list = (await res.json()).trips || [];
+  } catch (e) {}
+  const official = list.filter(t => t && t.id).map(t => ({ ...t, draft: false }));
+  const drafts = loadDrafts();
+  const left = drafts.filter(d => !official.some(t => t.start === d.start && t.name === d.name));
+  if (left.length !== drafts.length) saveDrafts(left);
+  return [...official, ...left.map(d => ({ ...d, draft: true }))];
+}
+
+// 旅行の日ならその旅行 → これから行くいちばん近い旅行 → 最後に見た旅行 → いちばん新しい旅行
+function pickTrip(list) {
+  const today = todayStr();
+  const byId = id => list.find(t => t.id === id);
+  if (TRIP_PARAM && byId(TRIP_PARAM)) return byId(TRIP_PARAM);
+  const now = list.find(t => t.start <= today && today <= (t.end || t.start));
+  if (now) return now;
+  const next = list.filter(t => t.start > today).sort((a, b) => a.start < b.start ? -1 : 1)[0];
+  if (next) return next;
+  return byId(store('localStorage', 'trip-last-trip')) ||
+         [...list].sort((a, b) => a.start < b.start ? 1 : -1)[0] || null;
+}
+
+function tripOptions(list) {
+  const today = todayStr();
+  const opt = t => `<option value="${esc(t.id)}"${t.id === trip?.id ? ' selected' : ''}>${esc(t.name)}${t.draft ? '(下書き)' : ''}</option>`;
+  const ahead = list.filter(t => (t.end || t.start) >= today).sort((a, b) => a.start < b.start ? -1 : 1);
+  const past = list.filter(t => (t.end || t.start) < today).sort((a, b) => a.start < b.start ? 1 : -1);
+  return (ahead.length ? `<optgroup label="これから・旅行中">${ahead.map(opt).join('')}</optgroup>` : '') +
+         (past.length ? `<optgroup label="これまでの旅行">${past.map(opt).join('')}</optgroup>` : '');
+}
+
+// 予定のファイルがまだない日は、旅行の日付から空の日をつくる(下書きもこれ)
+function emptyDays(t) {
   const days = [];
-  for (let n = 1; n <= 14; n++) {
-    try {
-      const res = await fetch(`data/day${n}.json`, { cache: 'no-cache' });
-      if (!res.ok) break;
-      days.push({ id: 'day' + n, data: await res.json() });
-    } catch (e) { break; }
+  for (let n = 1, d = t.start; d && d <= (t.end || t.start) && n <= 30; n++, d = addDays(d, 1)) {
+    days.push({ id: 'day' + n, data: { title: `${n}日目`, date: d, weekday: weekdayOf(d), items: [] } });
   }
   return days;
 }
 
+// day1, day2 … と、ないファイルに当たるまで読む
+async function loadDays(t) {
+  if (!t) return [];
+  if (t.draft) return emptyDays(t);
+  const days = [];
+  for (let n = 1; n <= 30; n++) {
+    try {
+      const res = await fetch(`data/trips/${encodeURIComponent(t.id)}/day${n}.json`, { cache: 'no-cache' });
+      if (!res.ok) break;
+      days.push({ id: 'day' + n, data: await res.json() });
+    } catch (e) { break; }
+  }
+  // 足りない日(最後の日まで)は空の日で埋める
+  const blank = emptyDays(t);
+  for (let n = days.length; n < blank.length; n++) days.push(blank[n]);
+  return days;
+}
+
+const dayHref = id => `?trip=${encodeURIComponent(trip.id)}&day=${encodeURIComponent(id)}`;
 function daysHtml(days) {
-  if (days.length < 2) return '';
-  return days.map(d => {
+  return days.map((d, n) => {
     const [, mo, dd] = d.data.date.split('-').map(Number);
-    const label = (d.data.title.match(/\d+日目/) || [d.id])[0] + ' ' + mo + '/' + dd;
-    return `<a href="?day=${encodeURIComponent(d.id)}" class="${d.id === DAY ? 'on' : ''}"${d.id === DAY ? ' aria-current="page"' : ''}>${esc(label)}</a>`;
+    const label = (String(d.data.title || '').match(/\d+日目/) || [`${n + 1}日目`])[0] + ' ' + mo + '/' + dd + `(${d.data.weekday || weekdayOf(d.data.date)})`;
+    return `<a href="${dayHref(d.id)}" class="${d.id === DAY ? 'on' : ''}"${d.id === DAY ? ' aria-current="page"' : ''}>${esc(label)}</a>`;
   }).join('');
+}
+
+// ---- 新しい旅行(下書き)と、Claude に頼む文 ----
+function requestText(t, days) {
+  const lines = [
+    'TakuVLOG トラベラー(~/Documents/Developer/trip-map)に、新しい旅行を足してください。README の「旅行を足す時」の手順で。',
+    `- 旅行の名前: ${t.name}`,
+    `- 日にち: ${t.start} 〜 ${t.end}(${days.length}日)`,
+  ];
+  if (t.dest) lines.push(`- 行き先: ${t.dest}`);
+  if (t.memo) lines.push('- 行きたい所・やりたいこと:', ...t.memo.split('\n').map(s => '  ' + s));
+  lines.push('まずは日ごとの空のファイルだけでもよいです。予定は行き先を調べて、案を出してから入れてください。');
+  return lines.join('\n');
+}
+function openAddSheet() {
+  const f = $('#addSheet form');
+  f.reset();
+  $('#addSheet').hidden = false;
+  f.dataset.auto = '1';
+}
+function suggestName() {
+  const f = $('#addSheet form'), s = $('#fStart').value, dest = $('#fDest').value.trim();
+  if (!f.dataset.auto || !s) return;
+  const [y, m] = s.split('-').map(Number);
+  const place = dest.replace(/[((].*$/, '').trim();
+  $('#fName').value = `${y}年${m}月 ${place ? place + '旅行' : '旅行'}`;
+}
+function setupAddSheet() {
+  const f = $('#addSheet form');
+  $('#addTrip').addEventListener('click', openAddSheet);
+  $('#fStart').addEventListener('change', () => {
+    if (!$('#fEnd').value || $('#fEnd').value < $('#fStart').value) $('#fEnd').value = $('#fStart').value;
+    suggestName();
+  });
+  $('#fDest').addEventListener('input', suggestName);
+  $('#fName').addEventListener('input', () => { delete f.dataset.auto; });
+  $('#addSheet').addEventListener('click', e => {
+    if (e.target.id === 'addSheet' || e.target.dataset?.act === 'close') $('#addSheet').hidden = true;
+  });
+  f.addEventListener('submit', e => {
+    e.preventDefault();
+    const start = $('#fStart').value, end = $('#fEnd').value || start;
+    if (end < start) { toast('最後の日が1日目より前になっています'); return; }
+    if ((Date.parse(end) - Date.parse(start)) / 86400000 >= 30) { toast('30日までにしてください'); return; }
+    const t = { id: 'draft-' + Date.now().toString(36), name: $('#fName').value.trim(), start, end,
+                dest: $('#fDest').value.trim(), memo: $('#fMemo').value.trim() };
+    if (!t.name) { toast('旅行の名前を入れてください'); return; }
+    if (!saveDrafts([...loadDrafts(), t])) { toast('この端末に保存できませんでした(プライベートブラウズ?)'); return; }
+    location.href = `?trip=${encodeURIComponent(t.id)}`;
+  });
+}
+function deleteDraft() {
+  if (!confirm(`下書き「${trip.name}」を消しますか?(この端末からだけ消えます)`)) return;
+  saveDrafts(loadDrafts().filter(d => d.id !== trip.id));
+  store('localStorage', 'trip-last-trip', '');
+  location.href = location.pathname;
+}
+
+// 予定がまだない日に出すカード
+function emptyCardHtml(days) {
+  const msg = trip.draft
+    ? 'この旅行は、この端末の中だけの下書きです。下のボタンで頼む文をコピーして Claude Code に貼ると、予定を調べて公開のページに入れてくれます。'
+    : 'この日の予定はまだありません。Claude Code に「' + trip.name + 'の' + (data.title.match(/\d+日目/) || [''])[0] + 'に予定を入れて」と頼んでください。';
+  return `<article class="card empty-card on" role="listitem">
+    <div class="name">${esc(trip.name)} ${trip.draft ? '<span class="badge">下書き</span>' : ''}</div>
+    <p>${esc(msg)}</p>
+    ${trip.memo ? `<p>メモ: ${esc(trip.memo)}</p>` : ''}
+    <div class="row">${trip.draft ? `<button type="button" class="main" data-act="ask">Claude に頼む文をコピー</button><button type="button" data-act="del">下書きを消す</button>` : ''}</div>
+  </article>`;
 }
 
 // 今の時刻(日本・韓国とも +9時間)に合わせる。
@@ -642,44 +835,51 @@ function nowIndex() {
 }
 
 async function main() {
-  const days = await loadDays();
-  allDays = days;
-  // 旅行の当日は、どのリンクから開いても今日の日を出す(日付ボタンで選び直した時だけ、その日)。
-  // ほかの日は、URL の日 → 最後に見た日 → 1日目の順。
-  const todayDay = days.find(d => d.data.date === todayStr());
-  const picked = store('sessionStorage', 'trip-pick');
-  if (todayDay && !(DAY_PARAM && picked === DAY_PARAM)) DAY = todayDay.id;
-  else if (!DAY_PARAM) DAY = (days.find(d => d.id === store('localStorage', 'trip-last')) || days[0] || { id: 'day1' }).id;
-  store('localStorage', 'trip-last', DAY);
-  try {
-    data = days.find(d => d.id === DAY)?.data;
-    if (!data) {
-      const res = await fetch(`data/${encodeURIComponent(DAY)}.json`, { cache: 'no-cache' });
-      if (!res.ok) throw new Error(res.status);
-      data = await res.json();
-    }
-  } catch (e) {
-    $('#title').textContent = 'データを読みこめませんでした';
-    $('#cards').innerHTML = '<p id="error">data/' + esc(DAY) + '.json が見つかりません。</p>';
+  setupAddSheet();
+  trips = await loadTrips();
+  trip = pickTrip(trips);
+  const sel = $('#tripSel');
+  sel.innerHTML = tripOptions(trips) || '<option>旅行がまだありません</option>';
+  sel.addEventListener('change', () => {
+    // 選んだ旅行はリンクでも開けるように、?trip= をつけて開き直す
+    store('sessionStorage', 'trip-pick', '');
+    location.href = `?trip=${encodeURIComponent(sel.value)}`;
+  });
+  if (!trip) {
+    $('#cards').innerHTML = '<p id="error">旅行がまだありません。右上の ＋ で足せます。</p>';
     return;
   }
-  items = data.items;
+  store('localStorage', 'trip-last-trip', trip.id);
+  const days = await loadDays(trip);
+  allDays = days;
+  // 旅行の当日は、どのリンクから開いても今日の日を出す(日付ボタンで選び直した時だけ、その日)。
+  // ほかの日は、URL の日 → 最後に見た日 → 1日目の順。最後に見た日は旅行ごとに覚える。
+  const lastKey = 'trip-last:' + trip.id;
+  const todayDay = days.find(d => d.data.date === todayStr());
+  const picked = store('sessionStorage', 'trip-pick');
+  if (todayDay && !(DAY_PARAM && picked === trip.id + '|' + DAY_PARAM)) DAY = todayDay.id;
+  else if (!DAY_PARAM || !days.some(d => d.id === DAY_PARAM)) DAY = (days.find(d => d.id === store('localStorage', lastKey)) || days[0] || { id: 'day1' }).id;
+  store('localStorage', lastKey, DAY);
+  data = days.find(d => d.id === DAY)?.data;
+  if (!data) {
+    $('#cards').innerHTML = '<p id="error">この旅行の予定を読みこめませんでした。</p>';
+    return;
+  }
+  items = data.items || [];
   items.forEach(it => { it.t0 = it.time; it.e0 = it.end; });
   if (isTripDay()) { loadOffsets(); applyOffsets(); }
-  const [, mo, d] = data.date.split('-').map(Number);
-  $('#title').innerHTML = esc(data.title) + `<small>${mo}/${d}(${esc(data.weekday || '')})</small>`;
-  document.title = data.title + ' マップ';
+  document.title = trip.name + ' | TakuVLOG トラベラー';
   $('#days').innerHTML = daysHtml(days);
   $('#days .on')?.scrollIntoView({ inline: 'center', block: 'nearest' });
   document.querySelectorAll('#days a').forEach(a => a.addEventListener('click', () =>
-    store('sessionStorage', 'trip-pick', new URLSearchParams(a.search).get('day'))));
+    store('sessionStorage', 'trip-pick', trip.id + '|' + new URLSearchParams(a.search).get('day'))));
 
   map = L.map('map', { zoomControl: false, attributionControl: true });
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19,
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
   }).addTo(map);
-  map.fitBounds(allBounds(), { padding: [30, 30] });
+  fitAll();
   addLocateButton();
   if (isTripDay()) startWatch();  // 旅行の当日は開いた時から自分の位置を出す
 
