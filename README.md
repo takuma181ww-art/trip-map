@@ -48,6 +48,8 @@
 
 ## そのほか
 
+- ホーム画面のアイコンは `apple-touch-icon.png`(180×180。元の絵は `icon.svg`、TakuVLOG の黄色にピンと飛行機)。名前は「トラベラー」。変えた時は、iPhone のホーム画面のアイコンを消して Safari から「ホーム画面に追加」し直さないと古いまま
+
 - AutoPrep(`~/Movies/AutoPrep/TELOP/place_cards.py`)が Vlog の場所の札をつくる時に `data/` の下の JSON を全部(サブフォルダも)読んでいる。`items` の `name`・`kr`・`googleQuery`・`time` の形は変えない
 
 - 地図のライブラリは Leaflet 1.9.4 に固定(cdnjs)。キーは不要
