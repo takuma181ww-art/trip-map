@@ -1,0 +1,35 @@
+{
+  "note": "交通費の見積もり(メニューの「交通費の見積もり」)で使う、国ごとの電車・バスの料金の決まり。おおよその目安。料金が変わったらここを直す",
+  "updated": "2026-11-17",
+  "rate": {
+    "KRW_per_JPY": 8.4,
+    "date": "2026-11-04",
+    "source": "両替ナビ(2026-11-04)の WOWPASS・明洞の両替所のレート(1円=8.35〜8.42ウォン)と、2026年10月の市場レート(約8.4ウォン、Investing.com)"
+  },
+  "countries": {
+    "kr": {
+      "label": "韓国(ソウル)",
+      "currency": "KRW",
+      "card": "T-money などの交通系 IC カード",
+      "walk_m": 800,
+      "road_factor": 1.3,
+      "subway": {
+        "base": 1550,
+        "base_km": 10,
+        "steps": [
+          { "to_km": 50, "every_km": 5, "add": 100 },
+          { "to_km": 9999, "every_km": 8, "add": 100 }
+        ],
+        "note": "IC カードの基本料金 1,550ウォン(10km まで)。10〜50km は 5km ごとに +100、50km より先は 8km ごとに +100"
+      },
+      "bus": { "base": 1500, "note": "ソウルの市内バス(幹線・支線)の IC カードの料金。要確認(2026年の公式の値はまだ確かめていない)" },
+      "airport_bus": { "base": 17000, "note": "空港リムジンバス(6001・6015 など)。予定のメモに「〇〇ウォン」と書いてあれば、そちらを使う" },
+      "sources": [
+        { "name": "Seoul Subway Guide: T-money, Climate Card & Unlimited Passes(2026)", "url": "https://blog.namanecard.com/en/seoul-subway-guide-2026-t-money-climate-card/" },
+        { "name": "Complete Guide to Seoul Public Transportation 2026", "url": "https://gkomunika.com/pages/complete-guide-to-seoul-public-transportation-2026-subway-bus-taxi-and-arex" },
+        { "name": "T-money, Climate Card, and K-Pass: Korea Transit Cards Explained", "url": "https://seoulstart.com/guides/tmoney-transit-card-guide" }
+      ],
+      "checked": "2026-11-17(旅行ガイドのサイト。公式の Seoul Metro・ソウル市の値で確かめるとよりよい)"
+    }
+  }
+}

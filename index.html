@@ -263,6 +263,27 @@
   }
   #toast.show { opacity: 1; }
   #error { padding: 24px 16px; color: var(--sub); }
+  /* 便利メニュー(右上の ⋯)と、交通費の見積もり */
+  .tool-list button {
+    display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; margin-top: 8px;
+    border: 1px solid var(--line); border-radius: 12px; padding: 12px; background: var(--card); color: var(--text);
+    font-family: inherit; font-size: 15px; font-weight: 700;
+  }
+  .tool-list button small { display: block; font-size: 12px; font-weight: 500; color: var(--sub); margin-top: 2px; }
+  .tool-list .ic { font-size: 22px; }
+  .fare-total { background: var(--card); border-radius: 14px; padding: 14px; margin: 6px 0 4px; text-align: center; box-shadow: var(--shadow); }
+  .fare-total .lbl { font-size: 12px; font-weight: 700; color: var(--sub); }
+  .fare-total .big { font-size: 28px; font-weight: 800; color: var(--accent); margin: 2px 0; }
+  .fare-total .yen { font-size: 14px; font-weight: 700; color: var(--text); }
+  .fare-total .sub { font-size: 12px; color: var(--sub); margin-top: 6px; line-height: 1.5; }
+  .sheet-wrap li.fare { justify-content: space-between; align-items: baseline; }
+  .sheet-wrap li.fare span:first-child { width: auto; text-align: left; flex: 1; min-width: 0; }
+  .sheet-wrap li.fare .amt { flex: 0 0 auto; font-weight: 700; white-space: nowrap; }
+  .sheet-wrap li.fare.off { color: var(--sub); }
+  .sheet-wrap li.fare small { color: var(--sub); }
+  .fare-day { display: flex; justify-content: space-between; font-size: 13px; font-weight: 700; padding: 6px 0 0; }
+  .fare-src { font-size: 11px; color: var(--sub); line-height: 1.5; margin-top: 10px; }
+  .fare-src a { color: var(--sub); }
 </style>
 </head>
 <body>
@@ -270,6 +291,7 @@
   <div class="trip-pick"><select id="tripSel" aria-label="旅行の切りかえ"><option>読みこみ中…</option></select></div>
   <button class="add-btn" id="addTrip" type="button" aria-label="新しい旅行を足す" title="新しい旅行を足す">＋</button>
   <button class="now-btn" id="nowBtn" type="button">今ここ</button>
+  <button class="add-btn" id="toolBtn" type="button" aria-label="便利メニュー" title="便利メニュー">⋯</button>
   <nav id="days" aria-label="日の切りかえ"></nav>
   <button id="shiftBar" type="button" hidden></button>
   <button id="visitBar" type="button" hidden></button>
@@ -301,6 +323,16 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"
         integrity="sha384-NElt3Op+9NBMCYaef5HxeJmU4Xeard/Lku8ek6hoPTvYkQPh3zLIrJP7KiRocsxO" crossorigin="anonymous"></script>
+<div id="toolSheet" class="sheet-wrap" hidden>
+  <div class="sheet" role="dialog" aria-label="便利メニュー">
+    <h2>便利メニュー</h2>
+    <div class="tool-list">
+      <button type="button" data-tool="fare"><span class="ic">🚇</span><span>交通費の見積もり<small>予定を電車・バスで回ると、いくらくらい?(IC カードのチャージのめやす)</small></span></button>
+    </div>
+    <div class="row"><button type="button" data-act="close">閉じる</button></div>
+  </div>
+</div>
+<div id="fareSheet" class="sheet-wrap" hidden><div class="sheet" role="dialog" aria-label="交通費の見積もり"></div></div>
 <script>
 // 旅行の一覧 data/trips.json と、旅行ごとの data/trips/<id>/day1.json, day2.json … を読む。
 // ?trip=<id>&day=day2 で開くとその旅行のその日。前のリンク(?day=day2 だけ)は、ふつうに開いた時と同じ旅行を出す。
@@ -840,8 +872,143 @@ function nowIndex() {
   return { idx, isDay };
 }
 
+// ---- 交通費の見積もり(便利メニュー) ----
+// 入っている予定を、となりの場所どうし電車・バスで動いた時の料金のめやす。決まりは data/fare_rules.json。
+// 飛行機・車・タクシー・ケーブルカーは数えない。800m 未満は歩く(0)。予定が少しだけでも出す。
+let fareRules = null;
+async function loadFareRules() {
+  if (fareRules) return fareRules;
+  const res = await fetch('data/fare_rules.json', { cache: 'no-cache' });
+  if (!res.ok) throw new Error('fare_rules');
+  return (fareRules = await res.json());
+}
+function meters(a, b) {
+  const R = 6371000, r = x => x * Math.PI / 180;
+  const dLat = r(b.lat - a.lat), dLng = r(b.lng - a.lng);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(r(a.lat)) * Math.cos(r(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+function subwayFare(rule, km) {
+  let f = rule.base, from = rule.base_km;
+  for (const st of rule.steps) {
+    if (km <= from) break;
+    const span = Math.min(km, st.to_km) - from;
+    f += Math.ceil(span / st.every_km) * st.add;
+    from = st.to_km;
+  }
+  return f;
+}
+// 移動の予定の名前・メモから、乗り物を決める
+function moveKind(mv) {
+  const t = (mv?.name || '') + ' ' + (mv?.memo || '');
+  const n = mv?.name || '';
+  if (/飛行機|ZIPAIR|フライト|✈|便/.test(n)) return 'plane';
+  if (/タクシー|車で|レンタカー|自家用車/.test(n)) return 'car';
+  if (/ケーブルカー|ロープウェイ|フェリー|船/.test(n)) return 'other';
+  if (/リムジンバス|空港バス/.test(n)) return 'airport_bus';
+  if (/歩いて|徒歩/.test(n)) return 'walk';
+  if (/バス/.test(n) && !/地下鉄|電車/.test(n)) return 'bus';
+  if (/地下鉄|電車|線|鉄道|メトロ/.test(t)) return 'subway';
+  return null;
+}
+function fareSegments(day) {
+  const its = day.data.items || [];
+  const segs = [];
+  let prev = null, moves = [];
+  for (const it of its) {
+    if (it.type === 'move') { moves.push(it); continue; }
+    if (it.lat == null) continue;                       // 場所が決まっていない予定は飛ばす(前の場所からつなぐ)
+    // 日の最初の移動(ホテルなど、予定にない所から出る)も数える。距離が分からないので基本料金
+    if (prev || moves.length) segs.push({ from: prev || { name: '出発地', country: it.country }, to: it, moves });
+    prev = it; moves = [];
+  }
+  return segs.map(sg => {
+    const c = sg.to.country || sg.from.country;
+    const rule = fareRules.countries?.[c];
+    const d = sg.from.lat != null ? meters(sg.from, sg.to) : 0;
+    const kinds = sg.moves.map(moveKind);
+    const label = sg.moves.length ? sg.moves.map(m => m.name).join(' → ') : '';
+    const base = { from: sg.from.name, to: sg.to.name, label, km: d / 1000 };
+    if (kinds.some(k => k === 'plane')) return { ...base, off: '飛行機(数えない)' };
+    if (kinds.some(k => k === 'car')) return { ...base, off: '車・タクシー(数えない)' };
+    if (kinds.some(k => k === 'other')) return { ...base, off: 'IC カードを使わない乗り物(数えない)' };
+    if (!kinds.length && sg.from.lat != null && d < 800) return { ...base, how: '歩く', fare: 0, cur: '' };
+    if (!rule) return { ...base, off: '料金の決まりがありません' };
+    if (kinds.includes('airport_bus')) {
+      const mv = sg.moves[kinds.indexOf('airport_bus')];
+      const m = (mv.memo || '').match(/(\d{1,3}(?:,\d{3})+|\d{4,6})\s*ウォン/);
+      return { ...base, how: '空港バス', fare: m ? Number(m[1].replace(/,/g, '')) : rule.airport_bus.base, cur: rule.currency };
+    }
+    if (kinds.includes('walk') || (!kinds.length && sg.from.lat != null && d < rule.walk_m)) return { ...base, how: '歩く', fare: 0, cur: rule.currency };
+    if (kinds.includes('bus')) return { ...base, how: 'バス', fare: rule.bus.base, cur: rule.currency };
+    const km = sg.from.lat != null ? d * rule.road_factor / 1000 : 0;
+    return { ...base, how: kinds.includes('subway') ? '地下鉄' : '電車・バス(推定)', fare: subwayFare(rule.subway, km), cur: rule.currency, guess: !kinds.includes('subway') };
+  });
+}
+const won = n => '₩' + Math.round(n).toLocaleString('ja-JP');
+const yen = (n, r) => '¥' + (Math.round(n / r / 10) * 10).toLocaleString('ja-JP');
+const roundUp = (n, u) => Math.ceil(n / u) * u;
+function fareRange(sum, nDays) {
+  // 下は予定どおり。上は、予定に書いていないホテルへの帰り(1日1回)と、乗り換えの失敗・予定外の移動(3割増し)も見込む
+  const base = fareRules.countries.kr.subway.base;
+  return [sum, sum ? roundUp(sum * 1.3 + base * nDays, 1000) : 0];
+}
+function fareText(days, all) {
+  const r = fareRules.rate.KRW_per_JPY;
+  const lines = [`【${trip.name}】交通費のめやす(電車・バス)`, `チャージのめやす: ${won(all[0])}〜${won(all[1])}(約${yen(all[0], r)}〜${yen(all[1], r)})`];
+  days.forEach(d => {
+    lines.push('', `${d.title}: ${won(d.sum)}`);
+    d.segs.forEach(s => lines.push(`・${s.from} → ${s.to}: ${s.off ? s.off : `${s.how} ${won(s.fare)}`}`));
+  });
+  lines.push('', `※おおよその目安です(1円=${r}ウォンで計算。${fareRules.rate.date} 時点)`);
+  return lines.join('\n');
+}
+async function openFareSheet() {
+  const box = $('#fareSheet .sheet');
+  box.innerHTML = '<h2>交通費の見積もり</h2><p class="hint">計算しています…</p>';
+  $('#fareSheet').hidden = false;
+  try { await loadFareRules(); } catch (e) { box.innerHTML = '<h2>交通費の見積もり</h2><p class="hint">料金の決まりを読みこめませんでした。</p><div class="row"><button type="button" data-act="close">閉じる</button></div>'; return; }
+  const r = fareRules.rate.KRW_per_JPY;
+  const days = allDays.map(d => {
+    const segs = fareSegments(d);
+    return { title: `${(String(d.data.title || '').match(/\d+日目/) || [d.id])[0]} ${d.data.date.slice(5).replace('-', '/')}`, segs, sum: segs.reduce((a, s) => a + (s.fare || 0), 0) };
+  }).filter(d => d.segs.length);
+  const total = days.reduce((a, d) => a + d.sum, 0);
+  const all = fareRange(total, days.length);
+  const nRide = days.reduce((a, d) => a + d.segs.filter(s => s.fare > 0).length, 0);
+  const rule = fareRules.countries.kr;
+  box.innerHTML = '<h2>交通費の見積もり</h2>' + (days.length ? `
+    <div class="fare-total"><div class="lbl">チャージのめやす(電車・バス ${nRide}回)</div>
+      <div class="big">${won(all[0])}〜${won(all[1])}</div>
+      <div class="yen">約 ${yen(all[0], r)}〜${yen(all[1], r)}</div>
+      <div class="sub">下は予定どおりに動いた時。上は、予定にないホテルへの帰り(1日1回)と、乗り換えの失敗・予定外の移動(3割増し)も見込んだ額。</div></div>` +
+    days.map(d => `<div class="fare-day"><span>${esc(d.title)}</span><span>${won(d.sum)}</span></div><ul>${d.segs.map(s => `
+      <li class="fare${s.off ? ' off' : ''}"><span>${esc(s.from)} → ${esc(s.to)}<br><small>${esc(s.off || s.how + (s.km >= 1 ? `・約${s.km.toFixed(1)}km` : ''))}${s.label && !s.off ? `・${esc(s.label)}` : ''}</small></span><span class="amt">${s.off ? '—' : won(s.fare)}</span></li>`).join('')}</ul>`).join('') +
+    `<p class="fare-src">おおよその目安です。距離は地図の直線距離から出しています。乗り換えの割引は入れていないので、実際は少し安くなることが多いです。1円=${r}ウォン(${esc(fareRules.rate.date)})。<br>料金の決まり: ${esc(rule.subway.note)}。バス ${won(rule.bus.base)}・空港バス ${won(rule.airport_bus.base)}。<br>出どころ: ${rule.sources.map(x => `<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.name)}</a>`).join(' / ')}(${esc(rule.checked)})</p>`
+    : '<p class="hint">場所の入った予定がまだないので、見積もれません。</p>') +
+    '<div class="row"><button type="button" class="main" data-act="copy">コピー</button><button type="button" data-act="close">閉じる</button></div>';
+  box.dataset.text = days.length ? fareText(days, all) : '';
+}
+function setupTools() {
+  $('#toolBtn').addEventListener('click', () => { $('#toolSheet').hidden = false; });
+  $('#toolSheet').addEventListener('click', e => {
+    const b = e.target.closest('button');
+    if (e.target.id === 'toolSheet' || b?.dataset.act === 'close') { $('#toolSheet').hidden = true; return; }
+    if (b?.dataset.tool === 'fare') { $('#toolSheet').hidden = true; openFareSheet(); }
+  });
+  $('#fareSheet').addEventListener('click', async e => {
+    const act = e.target.closest('button')?.dataset.act;
+    if (e.target.id === 'fareSheet' || act === 'close') { $('#fareSheet').hidden = true; return; }
+    if (act === 'copy') {
+      try { await navigator.clipboard.writeText($('#fareSheet .sheet').dataset.text || ''); toast('コピーしました'); }
+      catch (err) { toast('コピーできませんでした'); }
+    }
+  });
+}
+
 async function main() {
   setupAddSheet();
+  setupTools();
   trips = await loadTrips();
   trip = pickTrip(trips);
   const sel = $('#tripSel');
