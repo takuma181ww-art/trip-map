@@ -47,6 +47,11 @@
 - 自宅の位置・予約番号などはリストにも書かない(リストは非公開だが、トラベラーと同じ決まりにする)
 - ホーム画面の入り口: `list/`(押すとリストを開くだけのページ。アイコンは `list/apple-touch-icon.png`)。置く時は `https://takuma181ww-art.github.io/trip-map/list/?setup` を開いて「ホーム画面に追加」
 
+## index.html を直した時(Claude へ: 必ず)
+
+- `index.html` の最後の方にある `const BUILD = '…'` を新しい値(日付-内容)に変える。開いた時に公開中の BUILD と見比べ、違えば1回だけ自動で読み直す(iPhone の Safari が古い版を最大10分ほど覚えていて、直した版がすぐ出なかったため。2026-11-19)
+- `data/` の JSON だけを変えた時は変えなくてよい(JSON は毎回読み直している)
+
 ## 予定を変える時(Claude へ: この手順で)
 
 1. 変えるのは `data/trips/<id>/dayN.json`(と旅行の日にちが変わる時は `data/trips.json`)だけ。`index.html` は触らない
