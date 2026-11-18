@@ -305,6 +305,18 @@
     flex: 0 0 auto; border: 0; border-radius: 10px; padding: 0 14px; background: var(--accent); color: #fff;
     font-family: inherit; font-size: 14px; font-weight: 700;
   }
+  #gcalBar {
+    margin: 8px 16px 0; border: 0; border-radius: 10px; padding: 7px 12px; text-align: left;
+    background: var(--chip); color: var(--text); font-family: inherit; font-size: 13px; font-weight: 600; line-height: 1.3;
+  }
+  #gcalBar[hidden] { display: none; }
+  #gcalBar small { color: var(--sub); font-weight: 500; }
+  .sheet-wrap select {
+    width: 100%; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--text);
+    font-family: inherit; font-size: 16px; padding: 9px 10px;
+  }
+  .badge.fam { color: #fff; background: #2f9e44; }
+  .badge.me { color: #fff; background: #1a73e8; }
   .found li { cursor: pointer; flex-direction: column; gap: 2px; }
   .found li b { font-size: 15px; }
   .found li small { color: var(--sub); font-size: 12px; line-height: 1.4; }
@@ -331,6 +343,7 @@
     <input id="dQuery" type="search" enterkeyhint="search" placeholder="行きたい場所を入れる(例: 駅前のパン屋)" maxlength="80" aria-label="行きたい場所">
     <button type="submit">探す</button>
   </form>
+  <button id="gcalBar" type="button" hidden></button>
   <div id="dots" aria-hidden="true"></div>
   <div id="cards" role="list"></div>
 </div>
@@ -373,6 +386,7 @@
     <input id="dTime" type="time">
     <label for="dMemo">メモ(なくてもよい)</label>
     <input id="dMemo" maxlength="200" placeholder="例: 11時開店・テイクアウト">
+    <div id="calPickBox" hidden><label for="dCal">どのカレンダーに足す?</label><select id="dCal"></select></div>
     <h3>どこですか?(押すと足します)</h3>
     <ul class="found" id="foundList"></ul>
     <p class="hint">この iPhone の中だけに保存します(公開のページには出ません)。</p>
@@ -504,17 +518,18 @@ function cardHtml(it, i) {
   if (hasPlace && it.country === 'kr') {
     btns = `<a class="btn-naver" href="#" data-naver="${i}">NAVERマップで開く</a>
             <a class="btn-google" href="${googleUrl(it)}" target="_blank" rel="noopener">Googleマップ</a>`;
-  } else if (hasPlace) {
-    // 日本の中は Google マップのナビが使えるので、こちらを目立たせる
+  } else if (hasPlace || it.googleQuery) {
+    // 日本の中は Google マップのナビが使えるので、こちらを目立たせる(位置が分からないカレンダーの予定は住所で開く)
     btns = `<a class="btn-main" href="${googleUrl(it)}" target="_blank" rel="noopener">Googleマップで開く</a>`;
   }
   return `<article class="card" role="listitem" data-i="${i}">
     <div class="card-head">
       <div class="num ${hasPlace ? '' : 'plain'}">${it.no ?? ''}</div>
       <div class="time">${it.time ? hm(it.time) : DAILY || it.local ? '<span class="was">時間なし</span>' : ''}${wasHtml(i)}</div>
-      ${DAILY || it.local ? `<button class="shift-btn" type="button" data-del="${i}">消す</button>` : shiftBtn(i, 'ここから再開')}
+      ${it.gcal ? `<a class="shift-btn" href="${esc(it.link)}" target="_blank" rel="noopener" style="text-decoration:none">カレンダー</a>`
+        : DAILY || it.local ? `<button class="shift-btn" type="button" data-del="${i}">消す</button>` : shiftBtn(i, 'ここから再開')}
     </div>
-    <div class="name">${esc(it.name)}${it.local && !DAILY ? ' <span class="badge">この iPhone だけ</span>' : ''}</div>
+    <div class="name">${it.gcal ? `<span class="badge ${it.cal === 'ファミリー' ? 'fam' : it.cal === '個人' ? 'me' : ''}">${esc(it.cal)}</span> ` : ''}${esc(it.name)}${it.local && !DAILY ? ' <span class="badge">この iPhone だけ</span>' : ''}</div>
     <div class="memo">${memoHtml(it.memo)}</div>
     ${hasPlace ? '' : '<div class="note">地図の印はありません</div>'}
     ${it.note ? `<div class="note">${esc(it.note)}</div>` : ''}
@@ -1124,7 +1139,17 @@ function deleteDaily(i) {
   box.save(all);
   location.href = box.href;
 }
-function addDaily(entry) {
+async function addDaily(entry) {
+  const cal = DAILY && gcalCals.length ? $('#dCal').value : '';
+  if (cal) {
+    store('localStorage', CALPICK_KEY, cal);
+    try {
+      const ev = await gcalAdd(data.date, entry, cal);
+      store('sessionStorage', 'daily-focus', 'g:' + ev.id);
+      location.href = dailyHref(data.date);
+    } catch (e) { toast(e.auth ? 'カレンダーとのつながりが切れました。上の帯からもう一度つないでください' : 'カレンダーに足せませんでした'); }
+    return;
+  }
   const box = localBox(), all = box.load();
   const it = { id: Date.now(), name: entry.name, time: $('#dTime').value || '', memo: $('#dMemo').value.trim(),
                lat: entry.lat ?? null, lng: entry.lng ?? null, country: entry.country || 'jp' };
@@ -1158,6 +1183,15 @@ function setupDailyAdd() {
   const f = $('#dailyAdd'), sheet = $('#findSheet');
   let found = [];
   f.hidden = false;
+  // つないでいる時は、どのカレンダーに足すかを選ぶ(前に選んだもの → 個人)
+  const canAdd = DAILY ? gcalCals.filter(c => c.canWrite) : [];
+  $('#calPickBox').hidden = !canAdd.length;
+  if (canAdd.length) {
+    const last = store('localStorage', CALPICK_KEY);
+    $('#dCal').innerHTML = canAdd.map(c => `<option value="${esc(c.id)}">${esc(c.label)}${c.label === '個人' ? '(自分だけ)' : c.label === 'ファミリー' ? '(家族にも出る)' : ''}</option>`).join('') +
+      '<option value="">この端末だけ(カレンダーに入れない)</option>';
+    $('#dCal').value = canAdd.some(c => c.id === last) || last === '' ? last : (canAdd.find(c => c.primary) || canAdd[0]).id;
+  }
   f.addEventListener('submit', async e => {
     e.preventDefault();
     const q = $('#dQuery').value.trim();
@@ -1243,7 +1277,135 @@ function updateLeaveTimes() {
   });
 }
 
-function setupDaily() {
+// ---- Google カレンダーとつなぐ(2026-11-19 Taku「iPhone・iPad・PC のどれでも同じに」) ----
+// 予定の置き場は Google カレンダー。トラベラーは見る・足す画面。ログインした人のカレンダーが出るので、
+// 個人の予定はその人の画面だけ、ファミリーは2人の画面に出る。読み書きはブラウザから Google へ直接(間にサーバーはない)。
+// GOOGLE_CLIENT_ID は Google Cloud の「OAuth クライアント ID(ウェブ)」。公開してよい値(秘密の鍵ではない)
+const GOOGLE_CLIENT_ID = '80654326956-8t21h3idvvd1fl14rkahj97hdqemr0t2.apps.googleusercontent.com';
+const GCAL_SCOPE = 'https://www.googleapis.com/auth/calendar.calendarlist.readonly https://www.googleapis.com/auth/calendar.events';
+const GCAL_TOKEN_KEY = 'gcal-token', GEO_KEY = 'geo-cache', CALPICK_KEY = 'gcal-add-to';
+let gcalCals = [];   // [{ id, label, primary }]
+function gcalToken() {
+  try { const t = JSON.parse(localStorage.getItem(GCAL_TOKEN_KEY) || 'null'); return t && t.exp > Date.now() + 60000 ? t.v : null; } catch (e) { return null; }
+}
+const gcalWas = () => !!localStorage.getItem(GCAL_TOKEN_KEY);   // 前につないだことがある(期限切れでも)
+function loadScript(src) {
+  return new Promise((ok, ng) => { const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = ng; document.head.appendChild(s); });
+}
+// ログイン(押した時だけ)。小さな窓ではなく、Google のページへ行って戻ってくる形にする
+// (iPhone・iPad・ホーム画面のアイコン・アプリの中のブラウザでも、窓がふさがれずに動くように)
+const GCAL_BACK = location.origin + location.pathname;   // 戻ってくる所(Google の設定の「リダイレクト URI」に同じものを入れてある)
+function gcalConnect() {
+  if (!GOOGLE_CLIENT_ID) { toast('Google カレンダーの設定がまだです(Claude に頼んでください)'); return; }
+  const state = Math.random().toString(36).slice(2);
+  store('sessionStorage', 'gcal-state', state);
+  store('sessionStorage', 'gcal-return', location.search);   // 見ていた日に戻る
+  const p = new URLSearchParams({ client_id: GOOGLE_CLIENT_ID, redirect_uri: GCAL_BACK, response_type: 'token',
+    scope: GCAL_SCOPE, state, include_granted_scopes: 'true', ...(gcalWas() ? {} : { prompt: 'consent' }) });
+  location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + p;
+}
+// Google から戻ってきた時(#access_token=…)。覚えて、見ていた日を開き直す。true ならこのあと開き直す
+function gcalCatchReturn() {
+  if (!/^#(access_token|error)=/.test(location.hash) && !/[#&](access_token|error)=/.test(location.hash)) return false;
+  const h = new URLSearchParams(location.hash.slice(1));
+  const back = store('sessionStorage', 'gcal-return') || '?mode=daily';
+  history.replaceState(null, '', location.pathname + back);
+  if (h.get('state') !== store('sessionStorage', 'gcal-state')) { toast('つなげませんでした(もう一度押してください)'); return false; }
+  if (h.get('error') || !h.get('access_token')) { toast('つなげませんでした(' + (h.get('error') || '') + ')'); return false; }
+  try { localStorage.setItem(GCAL_TOKEN_KEY, JSON.stringify({ v: h.get('access_token'), exp: Date.now() + (+h.get('expires_in') || 3600) * 1000 })); } catch (e) {}
+  location.replace(location.pathname + back);
+  return true;
+}
+function gcalDisconnect() {
+  if (!confirm('この端末で Google カレンダーとのつながりを切りますか?(カレンダーの予定は消えません)')) return;
+  const t = gcalToken();
+  try { localStorage.removeItem(GCAL_TOKEN_KEY); } catch (e) {}
+  if (t) fetch('https://oauth2.googleapis.com/revoke?token=' + encodeURIComponent(t), { method: 'POST' }).catch(() => {});
+  location.reload();
+}
+async function gapi(path, opt = {}) {
+  const t = gcalToken();
+  if (!t) throw Object.assign(new Error('auth'), { auth: true });
+  const res = await fetch('https://www.googleapis.com/calendar/v3/' + path, {
+    ...opt, headers: { Authorization: 'Bearer ' + t, 'Content-Type': 'application/json', ...(opt.headers || {}) } });
+  if (res.status === 401) { try { localStorage.setItem(GCAL_TOKEN_KEY, JSON.stringify({ v: '', exp: 0 })); } catch (e) {} throw Object.assign(new Error('auth'), { auth: true }); }
+  if (!res.ok) throw new Error('gcal ' + res.status);
+  return res.status === 204 ? null : res.json();
+}
+// 祝日・誕生日などは出さない。名前は「個人」(自分のメイン)・「ファミリー」・それ以外はカレンダーの名前
+async function gcalCalendars() {
+  const r = await gapi('users/me/calendarList?minAccessRole=reader');
+  return (r.items || []).filter(c => !/#(holiday|contacts|weather)@/.test(c.id) && !c.hidden).map(c => ({
+    id: c.id, primary: !!c.primary, canWrite: c.accessRole === 'owner' || c.accessRole === 'writer',
+    label: c.primary ? '個人' : /ファミリー|family/i.test(c.summary || '') ? 'ファミリー' : (c.summaryOverride || c.summary || 'カレンダー')
+  }));
+}
+// 予定の場所(文字)から地図の位置を探す。見つけた位置は端末に覚えて、同じ場所を何度も探さない
+async function geocode(loc) {
+  let cache = {};
+  try { cache = JSON.parse(localStorage.getItem(GEO_KEY) || '{}') || {}; } catch (e) {}
+  if (loc in cache) return cache[loc];
+  const addr = loc.replace(/^.*?〒\s*\d{3}-?\d{4}\s*/, '').trim();
+  const tries = [...new Set([loc, addr, addr.replace(/(\d+)-\d+(-\d+)?\s*$/, '$1丁目'), addr.replace(/[\d-]+\s*$/, '')].filter(s => s && s.length > 3))];
+  let hit = null;
+  for (const q of tries) {
+    try {
+      const p = new URLSearchParams({ q, format: 'jsonv2', limit: '1', 'accept-language': 'ja' });
+      const r = await (await fetch('https://nominatim.openstreetmap.org/search?' + p)).json();
+      if (r[0]) { hit = [+r[0].lat, +r[0].lon, q !== loc && q !== addr]; break; }
+    } catch (e) {}
+  }
+  cache[loc] = hit;
+  try { localStorage.setItem(GEO_KEY, JSON.stringify(cache)); } catch (e) {}
+  return hit;
+}
+const jstHM = dt => toHM(Math.floor(Date.parse(dt) / 60000) + 540);
+const stripHtml = s => String(s || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&');
+// その日の予定を、選んだカレンダー全部から読む(1日の予定はカードに、場所があれば地図に)
+async function gcalDay(date) {
+  gcalCals = await gcalCalendars();
+  const q = new URLSearchParams({ timeMin: date + 'T00:00:00+09:00', timeMax: addDays(date, 1) + 'T00:00:00+09:00', singleEvents: 'true', orderBy: 'startTime', maxResults: '50' });
+  const lists = await Promise.all(gcalCals.map(c => gapi(`calendars/${encodeURIComponent(c.id)}/events?${q}`).then(r => ({ c, ev: r.items || [] })).catch(() => ({ c, ev: [] }))));
+  const out = [];
+  for (const { c, ev } of lists) for (const e of ev) {
+    if (e.status === 'cancelled') continue;
+    const it = { id: 'g:' + e.id, gcal: true, cal: c.label, calId: c.id, link: e.htmlLink, name: e.summary || '(名前なし)',
+                 time: e.start?.dateTime ? jstHM(e.start.dateTime) : '', end: e.end?.dateTime ? jstHM(e.end.dateTime) : undefined,
+                 memo: stripHtml(e.description).replace('(トラベラーで足した予定)', '').split('\n').map(s => s.replace(/^[・\-\s]+/, '').trim()).filter(Boolean).join('。'),
+                 lat: null, lng: null, country: 'jp' };
+    const pp = e.extendedProperties?.private || {};
+    if (pp.arrive) it.arrive = pp.arrive;
+    if (e.location) {
+      it.googleQuery = e.location;
+      if (pp.lat && pp.lng) { it.lat = +pp.lat; it.lng = +pp.lng; }
+      else { const g = await geocode(e.location); if (g) { it.lat = g[0]; it.lng = g[1]; if (g[2]) it.note = '地図の印はおおよその位置(Google マップは住所で開きます)'; } }
+    }
+    out.push(it);
+  }
+  return out;
+}
+// 予定をカレンダーに足す(時間がなければ終日)。場所の位置も予定に覚えておく(どの端末でも探し直さない)
+async function gcalAdd(date, entry, calId) {
+  const time = $('#dTime').value, memo = $('#dMemo').value.trim();
+  const ev = { summary: entry.name, description: (memo ? memo + '\n' : '') + '(トラベラーで足した予定)' };
+  if (entry.lat != null) {
+    ev.location = entry.addr ? `${entry.name} ${entry.addr}` : entry.name;
+    ev.extendedProperties = { private: { lat: String(entry.lat), lng: String(entry.lng) } };
+  }
+  if (time) {
+    const end = toHM(toMin(time) + 60);
+    ev.start = { dateTime: `${date}T${time}:00+09:00`, timeZone: 'Asia/Tokyo' };
+    ev.end = { dateTime: `${end < time ? addDays(date, 1) : date}T${end}:00+09:00`, timeZone: 'Asia/Tokyo' };
+  } else { ev.start = { date }; ev.end = { date: addDays(date, 1) }; }
+  return gapi(`calendars/${encodeURIComponent(calId)}/events`, { method: 'POST', body: JSON.stringify(ev) });
+}
+function gcalBarHtml(state) {
+  if (!GOOGLE_CLIENT_ID) return '';
+  if (state === 'on') return `📅 Google カレンダー:${gcalCals.map(c => esc(c.label)).join('・')} <small>(タップで切る)</small>`;
+  return gcalWas() ? '📅 カレンダーをもう一度読む <small>(1時間ごとに必要・タップ)</small>' : '📅 Google カレンダーとつなぐ <small>(個人・ファミリーの予定が出ます)</small>';
+}
+
+async function setupDaily() {
   DAILY = true;
   const got = importFromHash();
   if (got?.n) { store('sessionStorage', 'daily-imported', String(got.n)); if (got.date && got.date !== (Q.get('date') || todayStr())) { location.replace(dailyHref(got.date)); return false; } }
@@ -1265,6 +1427,24 @@ function setupDaily() {
     return `<a href="${dailyHref(d)}" class="${d === date ? 'on' : ''}"${d === date ? ' aria-current="page"' : ''}>${rel}${m}/${dd}(${weekdayOf(d)})${n ? ` ・${n}` : ''}</a>`;
   }).join('');
   items = dailyItems(date);
+  // Google カレンダーの予定を混ぜる(つないでいる時だけ)
+  const bar = $('#gcalBar');
+  if (GOOGLE_CLIENT_ID) {
+    let on = false;
+    if (gcalToken()) {
+      try {
+        const ev = await gcalDay(date);
+        items = [...items, ...ev];
+        items.sort((a, b) => (a.time ? 0 : 1) - (b.time ? 0 : 1) || (a.time || '').localeCompare(b.time || ''));
+        let no = 0;
+        items.forEach(it => { delete it.no; if (it.lat != null) it.no = ++no; });
+        on = true;
+      } catch (e) { if (!e.auth) toast('カレンダーを読めませんでした'); }
+    }
+    bar.hidden = false;
+    bar.innerHTML = gcalBarHtml(on ? 'on' : 'off');
+    bar.onclick = on ? gcalDisconnect : gcalConnect;
+  }
   data = { title: '日常', date, weekday: weekdayOf(date), items };
   allDays = [{ id: date, data }];
   items.forEach(it => { it.t0 = it.time; it.e0 = it.end; });
@@ -1336,6 +1516,7 @@ async function setupTrip() {
 }
 
 async function main() {
+  if (gcalCatchReturn()) return;   // Google のログインから戻ってきた時は、見ていた日を開き直す
   setupAddSheet();
   setupTools();
   trips = await loadTrips();
@@ -1344,7 +1525,7 @@ async function main() {
   const tripToday = trips.some(t => !t.draft && t.start <= today && today <= (t.end || t.start));
   const mode = Q.get('mode') || (TRIP_PARAM || DAY_PARAM ? 'trip' : null) ||
                (tripToday ? 'trip' : null) || store('localStorage', MODE_KEY) || 'daily';
-  if (mode === 'daily' && setupDaily() === false) return;   // 取り込んだ予定の日へ開き直す時
+  if (mode === 'daily' && (await setupDaily()) === false) return;   // 取り込んだ予定の日へ開き直す時
   setupModeTabs();
   if (!DAILY && !(await setupTrip())) return;
 

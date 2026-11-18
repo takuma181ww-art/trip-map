@@ -23,6 +23,9 @@
 - 時間のある予定は時刻の順、時間なしはそのあと。カードの「消す」で消す。行けた・行けなかった・GPS で近くに来たら自動で「行けた」は旅行と同じ
 - 旅行の画面にも同じ入力枠がある(2026-11-19〜)。足した場所はその日の予定に時刻の順で混ざり、「この iPhone だけ」の札と「消す」が付く。保存は localStorage の `trip-extra`(キーは「旅行の id|日付」)で、公開の `dayN.json` は変わらない。正式に入れる時は Claude に頼む
 - **出る時刻**: 場所と時刻のある日常の予定には「10:44 に出る(11:40 に着くには・電車で約46分+余裕10分・目安)」が出る。着きたい時刻は `arrive`(なければ `time`)。今いる所(GPS)からの直線距離の目安(1.2km までは徒歩 75m/分、それより遠ければ 10分+道のり 900m/分)なので、正しい時間は横の「Google マップの経路で確かめる」で
+- **Google カレンダーとつなぐ**(2026-11-19〜。いちばんの置き場): 日常の画面の「📅 Google カレンダーとつなぐ」で Google にログインすると、そのアカウントのカレンダーの予定がカード・地図に出る(青い「個人」=自分のメイン、緑の「ファミリー」)。入力枠で足す時は「個人/ファミリー/この端末だけ」を選べ、カレンダーの予定として入る(場所の位置は予定の extendedProperties.private の lat/lng に入れる)。iPhone・iPad・PC のどれでも同じ。ログインは Google のページへ行って戻る形(response_type=token。窓は使わない)。つながりは1時間で切れ、帯を押すとすぐつなぎ直せる
+  - Google Cloud: プロジェクト `takuvlog-traveler`(Taku のアカウント)。Calendar API オン。OAuth は「外部・テスト中」で、使えるのはテストユーザーに入れた Taku と奥様だけ(人を足す時は「Google Auth Platform → 対象 → テストユーザー」)。クライアントは「TakuVLOG Traveler web」(ウェブ)。生成元 `https://takuma181ww-art.github.io` と `http://localhost:8799`、リダイレクト URI `https://takuma181ww-art.github.io/trip-map/` と `http://localhost:8799/`。index.html の `GOOGLE_CLIENT_ID` がこのクライアント ID(公開してよい値)
+  - 予定の場所(文字)の位置は Nominatim で探して端末に覚える(`geo-cache`)。見つからない時は印なしで、Google マップは住所で開く
 - **カレンダーなどから取り込む**: `?mode=daily#add=<base64url の JSON>` を開くと、その予定を日常に足す(同じ日・名前・時刻はだぶらせない)。JSON は `[{date, name, time, arrive, memo, lat, lng, googleQuery, note}]`。「#」より後ろはサーバーに送られないので、予定の中身は公開されない。Claude はカレンダーの予定(場所あり)からこのリンクをつくって Taku に渡す。iPhone のショートカットから毎朝つくる案もある(未着手)
 - **日常の行き先はその端末の中(localStorage の `daily-plans`)だけに保存する。data/ には入れない**(このページは誰でも見られるので、毎日の行き先を公開しないため)。iPhone を替えたり Safari のデータを消すと消える
 
