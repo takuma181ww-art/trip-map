@@ -143,6 +143,7 @@
     border: 1.5px solid transparent;
   }
   .card.on { border-color: var(--accent); }
+  .card:has(.ask) { overflow-y: auto; }   /* 行き先の候補が出ると長くなるので、カードの中で送れるように */
   .card-head { display: flex; align-items: center; gap: 10px; }
   .num {
     flex: 0 0 auto; width: 30px; height: 30px; border-radius: 50%;
@@ -317,6 +318,19 @@
   }
   .badge.fam { color: #fff; background: #2f9e44; }
   .badge.me { color: #fff; background: #1a73e8; }
+  /* 行き先はこれですか?(行き先のないカレンダーの予定) */
+  .ask { margin-top: 8px; }
+  .refind { display: flex; gap: 8px; margin-top: 12px; }
+  .refind input { flex: 1; min-width: 0; }
+  .refind button { flex: 0 0 auto; border: 0; border-radius: 10px; padding: 0 14px; background: var(--accent); color: #fff; font-family: inherit; font-size: 14px; font-weight: 700; }
+  .ask-list { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 6px; }
+  .ask-list small { color: var(--sub); font-size: 12px; }
+  .ask-list a.cand { display: block; text-decoration: none; color: var(--text); background: var(--chip); border-radius: 10px; padding: 7px 10px; border: 1.5px solid var(--line); }
+  .ask-list a.cand b { display: block; font-size: 14px; }
+  .ask-list a.cand small { display: block; }
+  /* 検索シートを「行き先を決める」形で開いた時は、時間・メモ・カレンダー・場所なしで足すを隠す */
+  #findSheet.assign label[for="dTime"], #findSheet.assign #dTime, #findSheet.assign label[for="dMemo"], #findSheet.assign #dMemo,
+  #findSheet.assign #calPickBox, #findSheet.assign li[data-k="-1"] { display: none; }
   .found li { cursor: pointer; flex-direction: column; gap: 2px; }
   .found li b { font-size: 15px; }
   .found li small { color: var(--sub); font-size: 12px; line-height: 1.4; }
@@ -387,7 +401,8 @@
     <label for="dMemo">メモ(なくてもよい)</label>
     <input id="dMemo" maxlength="200" placeholder="例: 11時開店・テイクアウト">
     <div id="calPickBox" hidden><label for="dCal">どのカレンダーに足す?</label><select id="dCal"></select></div>
-    <h3>どこですか?(押すと足します)</h3>
+    <form id="reFind" class="refind"><input id="dQuery2" type="search" enterkeyhint="search" placeholder="名前や住所を変えて探す" aria-label="名前を変えて探す"><button type="submit">探す</button></form>
+    <h3 id="foundHead">どこですか?(押すと足します)</h3>
     <ul class="found" id="foundList"></ul>
     <p class="hint">この iPhone の中だけに保存します(公開のページには出ません)。</p>
     <div class="row"><button type="button" data-act="close">やめる</button></div>
@@ -531,10 +546,11 @@ function cardHtml(it, i) {
     </div>
     <div class="name">${it.gcal ? `<span class="badge ${it.cal === 'ファミリー' ? 'fam' : it.cal === '個人' ? 'me' : ''}">${esc(it.cal)}</span> ` : ''}${esc(it.name)}${it.local && !DAILY ? ' <span class="badge">この iPhone だけ</span>' : ''}</div>
     <div class="memo">${memoHtml(it.memo)}</div>
-    ${hasPlace ? '' : '<div class="note">地図の印はありません</div>'}
+    ${hasPlace || needsPlace(it) ? '' : '<div class="note">地図の印はありません</div>'}
     ${it.note ? `<div class="note">${esc(it.note)}</div>` : ''}
     ${it.arrive ? `<div class="note">${esc(hm(it.arrive))} までに着く</div>` : ''}
     ${goHtml(it, i)}
+    ${askPlaceHtml(it, i)}
     ${leaveHtml(it, i)}
     ${visitHtml(it, i)}
     ${btns ? `<div class="btns">${btns}</div>` : ''}
@@ -725,6 +741,7 @@ function renderCards() {
     const [i, mode] = a.dataset.route.split(':'); openRoute(+i, mode, e);
   }));
   updateGoTimes();
+  if (DAILY) fillAskPlaces();   // 行き先のない予定の候補を探す
   document.querySelectorAll('[data-visit]').forEach(b => b.addEventListener('click', () => {
     const [i, s] = b.dataset.visit.split(':'); setVisit(+i, s);
   }));
@@ -1197,7 +1214,11 @@ function setupDailyAdd() {
     const q = $('#dQuery').value.trim();
     if (!q) { $('#dQuery').focus(); return; }
     $('#dQuery').blur();
-    $('#findTitle').textContent = `「${q}」を ${DAILY ? dailyLabel(data.date) : (String(data.title || '').match(/\d+日目/) || [''])[0] + ' ' + dailyLabel(data.date).replace(/ (今日|明日|昨日)$/, '')} に足す`;
+    const assign = sheet.dataset.assign != null ? items[+sheet.dataset.assign] : null;
+    sheet.classList.toggle('assign', !!assign);
+    $('#dQuery2').value = q;
+    $('#foundHead').textContent = assign ? 'どこですか?(押すと行き先に決まります)' : 'どこですか?(押すと足します)';
+    $('#findTitle').textContent = assign ? `「${assign.name}」の行き先を選ぶ` : `「${q}」を ${DAILY ? dailyLabel(data.date) : (String(data.title || '').match(/\d+日目/) || [''])[0] + ' ' + dailyLabel(data.date).replace(/ (今日|明日|昨日)$/, '')} に足す`;
     $('#dTime').value = ''; $('#dMemo').value = '';
     const ul = $('#foundList');
     ul.innerHTML = '<li><small>探しています…</small></li>';
@@ -1205,7 +1226,7 @@ function setupDailyAdd() {
     try { found = await findPlaces(q); } catch (err) { found = []; }
     const g = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(q);
     ul.innerHTML = found.map((r, k) => `<li data-k="${k}"><b>${esc(r.name)}</b><small>${esc(r.addr)}${me ? `・約${(meters({ lat: me[0], lng: me[1] }, r) / 1000).toFixed(1)}km` : ''}</small></li>`).join('') +
-      (found.length ? '' : '<li><small>地図の上では見つかりませんでした。下の「場所なしで足す」か、Google マップで探してください。</small></li>') +
+      (found.length ? '' : `<li><small>地図の上では見つかりませんでした。${assign ? '名前や住所を変えて探すか、' : '下の「場所なしで足す」か、'}Google マップで探してください。</small></li>`) +
       `<li class="plain" data-k="-1"><b>＋ 場所なしで足す</b><small>「${esc(q)}」をメモとして足す(地図の印は付きません)</small></li>` +
       `<li class="plain" data-g="1"><b>Google マップで探す</b><small>見つからない時に。見つけたら座標(35.68, 139.76 の形)をコピーして上の欄に貼れます</small></li>`;
     ul.dataset.q = q; ul.dataset.g = g;
@@ -1216,10 +1237,19 @@ function setupDailyAdd() {
     if (li.dataset.g) { window.open(e.currentTarget.dataset.g, '_blank', 'noopener'); return; }
     if (li.dataset.k == null) return;
     const k = +li.dataset.k;
+    if (sheet.dataset.assign != null && k >= 0) { setEventPlace(+sheet.dataset.assign, found[k]); return; }
     addDaily(k < 0 ? { name: e.currentTarget.dataset.q } : found[k]);
   });
+  // シートの中で名前を変えて探し直す(行き先を決める途中でも、そのまま続けられる)
+  $('#reFind').addEventListener('submit', e => {
+    e.preventDefault();
+    const q = $('#dQuery2').value.trim();
+    if (!q) return;
+    $('#dQuery').value = q; $('#dQuery2').blur();
+    f.requestSubmit();
+  });
   sheet.addEventListener('click', e => {
-    if (e.target.id === 'findSheet' || e.target.closest('button')?.dataset.act === 'close') sheet.hidden = true;
+    if (e.target.id === 'findSheet' || e.target.closest('button')?.dataset.act === 'close') { sheet.hidden = true; delete sheet.dataset.assign; sheet.classList.remove('assign'); }
   });
 }
 // ---- カレンダーなどから取り込む(2026-11-19) ----
@@ -1383,6 +1413,10 @@ async function gcalDay(date) {
                  lat: null, lng: null, country: 'jp' };
     const pp = e.extendedProperties?.private || {};
     if (pp.arrive) it.arrive = pp.arrive;
+    it.eventId = e.id; it.canWrite = c.canWrite; it.noPlace = pp.noPlace === '1';
+    // 読むだけのカレンダーで選んだ行き先は、端末に覚えたものを使う
+    const own = !e.location && loadPlaceFix()[e.id];
+    if (own) { if (own.lat == null) it.noPlace = true; else { it.lat = own.lat; it.lng = own.lng; it.googleQuery = own.q; } }
     if (e.location) {
       it.googleQuery = e.location;
       if (pp.lat && pp.lng) { it.lat = +pp.lat; it.lng = +pp.lng; }
@@ -1392,6 +1426,79 @@ async function gcalDay(date) {
   }
   return out;
 }
+// ---- 行き先が入っていない予定に「行き先はこれですか?」(2026-11-19 Taku) ----
+// カレンダーに場所を入れずに登録した予定が多いので、カードで予定の名前から候補を探して聞く。
+// 選んだら予定の「場所」と位置(extendedProperties.private の lat/lng)をカレンダーに書き戻す(どの端末でも次から聞かない)。
+// 「場所はない」を押したら noPlace=1 を書いて、次から聞かない
+const PLACEFIX_KEY = 'gcal-place-fix';   // 読むだけのカレンダーの分だけ、端末に覚える
+function loadPlaceFix() { try { return JSON.parse(localStorage.getItem(PLACEFIX_KEY) || '{}') || {}; } catch (e) { return {}; } }
+const needsPlace = it => it.gcal && it.lat == null && !it.googleQuery && !it.noPlace;
+function askPlaceHtml(it, i) {
+  if (!needsPlace(it)) return '';
+  return `<div class="ask" data-ask="${i}"><div class="go-label">📍 行き先はこれですか?(押すと決まります)</div>
+    <div class="ask-list"><small>「${esc(it.name)}」で探しています…</small></div>
+    <div class="go-btns"><a href="#" data-askmore="${i}">ほかを探す</a><a href="#" data-asknone="${i}">場所はない</a></div></div>`;
+}
+// カードが出たら、行き先のない予定の候補を順に探す(地図の検索は1秒に1回までの決まりなので、1件ずつ)
+async function fillAskPlaces() {
+  for (const box of document.querySelectorAll('[data-ask]')) {
+    const i = +box.dataset.ask, it = items[i], list = box.querySelector('.ask-list');
+    let found = [];
+    try { found = (await findPlaces(it.name)).slice(0, 4); } catch (e) {}
+    box._found = found;
+    list.innerHTML = found.length
+      ? found.map((r, k) => `<a href="#" class="cand" data-cand="${i}:${k}"><b>${esc(r.name)}</b><small>${esc(r.addr)}${me ? `・約${(meters({ lat: me[0], lng: me[1] }, r) / 1000).toFixed(1)}km` : ''}</small></a>`).join('')
+      : '<small>地図の上では見つかりませんでした。「ほかを探す」で名前を変えて探せます</small>';
+    await new Promise(r => setTimeout(r, 1100));
+  }
+}
+async function setEventPlace(i, place) {
+  const it = items[i];
+  if (!it.canWrite) {   // 読むだけのカレンダーは書き戻せないので、この端末に覚える
+    const v = loadPlaceFix(); v[it.eventId] = { lat: place.lat, lng: place.lng, q: `${place.name} ${place.addr || ''}`.trim() };
+    try { localStorage.setItem(PLACEFIX_KEY, JSON.stringify(v)); } catch (e) {}
+  } else {
+    try {
+      await gapi(`calendars/${encodeURIComponent(it.calId)}/events/${encodeURIComponent(it.eventId)}`, { method: 'PATCH', body: JSON.stringify({
+        location: `${place.name} ${place.addr || ''}`.trim(),
+        extendedProperties: { private: { lat: String(place.lat), lng: String(place.lng) } } }) });
+    } catch (e) { toast(e.auth ? 'カレンダーとのつながりが切れました。もう一度つないでください' : 'カレンダーに書けませんでした'); return; }
+  }
+  store('sessionStorage', 'daily-focus', it.id);
+  toast(`「${place.name}」を行き先にしました`);
+  location.href = dailyHref(data.date);
+}
+async function setEventNoPlace(i) {
+  const it = items[i];
+  if (it.canWrite) {
+    try { await gapi(`calendars/${encodeURIComponent(it.calId)}/events/${encodeURIComponent(it.eventId)}`, { method: 'PATCH', body: JSON.stringify({ extendedProperties: { private: { noPlace: '1' } } }) }); }
+    catch (e) { toast('カレンダーに書けませんでした'); return; }
+  } else {
+    const v = loadPlaceFix(); v[it.eventId] = { lat: null, lng: null, q: '' };
+    try { localStorage.setItem(PLACEFIX_KEY, JSON.stringify(v)); } catch (e) {}
+  }
+  store('sessionStorage', 'daily-focus', it.id);
+  location.href = dailyHref(data.date);
+}
+function bindAskPlaces() {
+  $('#cards').addEventListener('click', e => {
+    const a = e.target.closest('[data-cand], [data-askmore], [data-asknone]');
+    if (!a) return;
+    e.preventDefault();
+    if (a.dataset.cand) {
+      const [i, k] = a.dataset.cand.split(':').map(Number);
+      const box = document.querySelector(`[data-ask="${i}"]`);
+      setEventPlace(i, box._found[k]);
+    } else if (a.dataset.askmore) {
+      // 入力枠の検索シートを「この予定の行き先を決める」形で開く
+      const i = +a.dataset.askmore;
+      $('#findSheet').dataset.assign = String(i);
+      $('#dQuery').value = items[i].name;
+      $('#dailyAdd').requestSubmit();
+    } else if (a.dataset.asknone && confirm(`「${items[+a.dataset.asknone].name}」は場所のない予定にしますか?(次から聞きません)`)) setEventNoPlace(+a.dataset.asknone);
+  });
+}
+
 // 予定をカレンダーに足す(時間がなければ終日)。場所の位置も予定に覚えておく(どの端末でも探し直さない)
 async function gcalAdd(date, entry, calId) {
   const time = $('#dTime').value, memo = $('#dMemo').value.trim();
@@ -1435,6 +1542,7 @@ async function setupDaily() {
     return `<a href="${dailyHref(d)}" class="${d === date ? 'on' : ''}"${d === date ? ' aria-current="page"' : ''}>${rel}${m}/${dd}(${weekdayOf(d)})${n ? ` ・${n}` : ''}</a>`;
   }).join('');
   items = dailyItems(date);
+  bindAskPlaces();
   // Google カレンダーの予定を混ぜる(つないでいる時だけ)
   const bar = $('#gcalBar');
   if (GOOGLE_CLIENT_ID) {
@@ -1643,7 +1751,7 @@ async function main() {
 // ---- 新しい版が出ていたら自動で読み直す(2026-11-19) ----
 // GitHub Pages のページは iPhone の Safari に最大10分ほど覚えられ、直した版がすぐ出なかった。
 // 開いた時に今の版の印(BUILD)を読みに行き、違えば1回だけ読み直す。直したら BUILD を変える(README の決まり)
-const BUILD = '2026-11-19-gcal3';
+const BUILD = '2026-11-19-ask2';
 async function checkNewBuild() {
   try {
     const t = await (await fetch(location.pathname + '?build=' + Date.now(), { cache: 'no-store' })).text();
