@@ -1295,13 +1295,18 @@ function loadScript(src) {
 // ログイン(押した時だけ)。小さな窓ではなく、Google のページへ行って戻ってくる形にする
 // (iPhone・iPad・ホーム画面のアイコン・アプリの中のブラウザでも、窓がふさがれずに動くように)
 const GCAL_BACK = location.origin + location.pathname;   // 戻ってくる所(Google の設定の「リダイレクト URI」に同じものを入れてある)
-function gcalConnect() {
+// silent=true は「見えないつなぎ直し」(prompt=none)。前に許可していれば Google の画面を出さずにすぐ戻ってくる。
+// 許可や再ログインが要る時はエラーで戻ってくるので、その時だけ帯を出して押してもらう(2026-11-19 Taku「毎回聞かれる」)
+const GCAL_HINT_KEY = 'gcal-hint';   // つないだアカウント(メインのカレンダーの id = メールアドレス)。アカウント選びを省く
+function gcalConnect(silent = false) {
   if (!GOOGLE_CLIENT_ID) { toast('Google カレンダーの設定がまだです(Claude に頼んでください)'); return; }
-  const state = Math.random().toString(36).slice(2);
+  const state = (silent ? 's' : 'u') + Math.random().toString(36).slice(2);
   store('sessionStorage', 'gcal-state', state);
   store('sessionStorage', 'gcal-return', location.search);   // 見ていた日に戻る
+  const hint = store('localStorage', GCAL_HINT_KEY);
   const p = new URLSearchParams({ client_id: GOOGLE_CLIENT_ID, redirect_uri: GCAL_BACK, response_type: 'token',
-    scope: GCAL_SCOPE, state, include_granted_scopes: 'true', ...(gcalWas() ? {} : { prompt: 'consent' }) });
+    scope: GCAL_SCOPE, state, include_granted_scopes: 'true', ...(hint ? { login_hint: hint } : {}),
+    ...(silent ? { prompt: 'none' } : gcalWas() ? {} : { prompt: 'consent' }) });
   location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + p;
 }
 // Google から戻ってきた時(#access_token=…)。覚えて、見ていた日を開き直す。true ならこのあと開き直す
@@ -1311,7 +1316,8 @@ function gcalCatchReturn() {
   const back = store('sessionStorage', 'gcal-return') || '?mode=daily';
   history.replaceState(null, '', location.pathname + back);
   if (h.get('state') !== store('sessionStorage', 'gcal-state')) { toast('つなげませんでした(もう一度押してください)'); return false; }
-  if (h.get('error') || !h.get('access_token')) { toast('つなげませんでした(' + (h.get('error') || '') + ')'); return false; }
+  // 見えないつなぎ直しが通らなかった時は、何も言わずに帯を出す(押せば Google の画面でつなげる)
+  if (h.get('error') || !h.get('access_token')) { if (!h.get('state').startsWith('s')) toast('つなげませんでした(' + (h.get('error') || '') + ')'); return false; }
   try { localStorage.setItem(GCAL_TOKEN_KEY, JSON.stringify({ v: h.get('access_token'), exp: Date.now() + (+h.get('expires_in') || 3600) * 1000 })); } catch (e) {}
   location.replace(location.pathname + back);
   return true;
@@ -1364,6 +1370,8 @@ const stripHtml = s => String(s || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[
 // その日の予定を、選んだカレンダー全部から読む(1日の予定はカードに、場所があれば地図に)
 async function gcalDay(date) {
   gcalCals = await gcalCalendars();
+  const mine = gcalCals.find(c => c.primary);
+  if (mine) store('localStorage', GCAL_HINT_KEY, mine.id);   // 次のつなぎ直しでアカウント選びを省く
   const q = new URLSearchParams({ timeMin: date + 'T00:00:00+09:00', timeMax: addDays(date, 1) + 'T00:00:00+09:00', singleEvents: 'true', orderBy: 'startTime', maxResults: '50' });
   const lists = await Promise.all(gcalCals.map(c => gapi(`calendars/${encodeURIComponent(c.id)}/events?${q}`).then(r => ({ c, ev: r.items || [] })).catch(() => ({ c, ev: [] }))));
   const out = [];
@@ -1431,6 +1439,12 @@ async function setupDaily() {
   const bar = $('#gcalBar');
   if (GOOGLE_CLIENT_ID) {
     let on = false;
+    // 前につないだ端末で切れていたら、開いた時に1回だけ見えないつなぎ直しをする(押さなくても予定が出るように)
+    if (!gcalToken() && gcalWas() && !store('sessionStorage', 'gcal-silent-tried')) {
+      store('sessionStorage', 'gcal-silent-tried', '1');
+      gcalConnect(true);
+      return false;
+    }
     if (gcalToken()) {
       try {
         const ev = await gcalDay(date);
@@ -1443,7 +1457,7 @@ async function setupDaily() {
     }
     bar.hidden = false;
     bar.innerHTML = gcalBarHtml(on ? 'on' : 'off');
-    bar.onclick = on ? gcalDisconnect : gcalConnect;
+    bar.onclick = on ? gcalDisconnect : () => gcalConnect(false);
   }
   data = { title: '日常', date, weekday: weekdayOf(date), items };
   allDays = [{ id: date, data }];
@@ -1629,7 +1643,7 @@ async function main() {
 // ---- 新しい版が出ていたら自動で読み直す(2026-11-19) ----
 // GitHub Pages のページは iPhone の Safari に最大10分ほど覚えられ、直した版がすぐ出なかった。
 // 開いた時に今の版の印(BUILD)を読みに行き、違えば1回だけ読み直す。直したら BUILD を変える(README の決まり)
-const BUILD = '2026-11-19-gcal2';
+const BUILD = '2026-11-19-gcal3';
 async function checkNewBuild() {
   try {
     const t = await (await fetch(location.pathname + '?build=' + Date.now(), { cache: 'no-store' })).text();
