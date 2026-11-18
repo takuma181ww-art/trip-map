@@ -510,10 +510,10 @@ function cardHtml(it, i) {
   return `<article class="card" role="listitem" data-i="${i}">
     <div class="card-head">
       <div class="num ${hasPlace ? '' : 'plain'}">${it.no ?? ''}</div>
-      <div class="time">${it.time ? hm(it.time) : DAILY ? '<span class="was">時間なし</span>' : ''}${wasHtml(i)}</div>
-      ${DAILY ? `<button class="shift-btn" type="button" data-del="${i}">消す</button>` : shiftBtn(i, 'ここから再開')}
+      <div class="time">${it.time ? hm(it.time) : DAILY || it.local ? '<span class="was">時間なし</span>' : ''}${wasHtml(i)}</div>
+      ${DAILY || it.local ? `<button class="shift-btn" type="button" data-del="${i}">消す</button>` : shiftBtn(i, 'ここから再開')}
     </div>
-    <div class="name">${esc(it.name)}</div>
+    <div class="name">${esc(it.name)}${it.local && !DAILY ? ' <span class="badge">この iPhone だけ</span>' : ''}</div>
     <div class="memo">${memoHtml(it.memo)}</div>
     ${hasPlace ? '' : '<div class="note">地図の印はありません</div>'}
     ${it.note ? `<div class="note">${esc(it.note)}</div>` : ''}
@@ -614,6 +614,7 @@ function wasHtml(i) {
 }
 function applyOffsets() {
   items.forEach((it, i) => {
+    if (!it.t0) return;   // 入力枠で足した「時間なし」の予定はずらさない
     const d = offsets[i] || 0;
     it.time = toHM(toMin(it.t0) + d);
     if (it.e0) it.end = toHM(toMin(it.e0) + d);
@@ -1087,31 +1088,55 @@ function dailyItems(date) {
   list.forEach(it => { it.memo = it.memo || ''; if (it.lat != null) it.no = ++no; });
   return list;
 }
+// 旅行の日に入力枠で足した場所も、その端末の中だけ(公開の data/ は変えない)。キーは「旅行の id|日付」
+const EXTRA_KEY = 'trip-extra';
+function loadExtra() { try { const v = JSON.parse(localStorage.getItem(EXTRA_KEY) || '{}'); return v && typeof v === 'object' ? v : {}; } catch (e) { return {}; } }
+const extraId = () => trip.id + '|' + data.date;
+// 入力枠で足した分の置き場(日常 / 旅行)。読む・書く・足したあとに開き直す所
+function localBox() {
+  return DAILY
+    ? { key: data.date, load: loadDaily, save: saveDaily, href: dailyHref(data.date) }
+    : { key: extraId(), load: loadExtra, save: v => { try { localStorage.setItem(EXTRA_KEY, JSON.stringify(v)); return true; } catch (e) { return false; } },
+        href: `?trip=${encodeURIComponent(trip.id)}&day=${encodeURIComponent(DAY)}` };
+}
+// 旅行の日の予定に、この端末で足した場所を時刻の順に混ぜる(時間なしは最後)。印の番号は振り直す
+function mergeExtra(list) {
+  const extra = (loadExtra()[extraId()] || []).map(x => ({ ...x, memo: x.memo || '', local: true }));
+  if (!extra.length) return list;
+  const out = [...list];
+  extra.forEach(x => {
+    const k = x.time ? out.findIndex(it => it.time && it.time > x.time) : -1;
+    out.splice(k < 0 ? out.length : k, 0, x);
+  });
+  let no = 0;
+  out.forEach(it => { if (it.lat != null && it.type !== 'move') it.no = ++no; });
+  return out;
+}
 function deleteDaily(i) {
-  const it = items[i];
+  const it = items[i], box = localBox();
   if (!confirm(`「${it.name}」を消しますか?`)) return;
-  const all = loadDaily();
-  all[data.date] = (all[data.date] || []).filter(x => x.id !== it.id);
-  if (!all[data.date].length) delete all[data.date];
-  saveDaily(all);
-  location.href = dailyHref(data.date);
+  const all = box.load();
+  all[box.key] = (all[box.key] || []).filter(x => x.id !== it.id);
+  if (!all[box.key].length) delete all[box.key];
+  box.save(all);
+  location.href = box.href;
 }
 function addDaily(entry) {
-  const all = loadDaily();
+  const box = localBox(), all = box.load();
   const it = { id: Date.now(), name: entry.name, time: $('#dTime').value || '', memo: $('#dMemo').value.trim(),
                lat: entry.lat ?? null, lng: entry.lng ?? null, country: entry.country || 'jp' };
   if (entry.kr) it.kr = entry.kr;
-  (all[data.date] = all[data.date] || []).push(it);
-  if (!saveDaily(all)) { toast('この端末に保存できませんでした(プライベートブラウズ?)'); return; }
+  (all[box.key] = all[box.key] || []).push(it);
+  if (!box.save(all)) { toast('この端末に保存できませんでした(プライベートブラウズ?)'); return; }
   store('sessionStorage', 'daily-focus', String(it.id));
-  location.href = dailyHref(data.date);
+  location.href = box.href;
 }
 // 場所さがしは OpenStreetMap の Nominatim(キー不要)。今いる所の近くを先に出す
 async function findPlaces(q) {
   // 「35.68, 139.76」のように座標を貼った時はそのまま使う
   const ll = q.match(/(-?\d{1,2}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)/);
   if (ll) return [{ name: q.replace(ll[0], '').trim() || '指定した場所', addr: `${ll[1]}, ${ll[2]}`, lat: +ll[1], lng: +ll[2], country: 'jp' }];
-  const p = new URLSearchParams({ q, format: 'jsonv2', limit: '8', 'accept-language': 'ja', addressdetails: '1' });
+  const p = new URLSearchParams({ q, format: 'jsonv2', limit: '8', 'accept-language': 'ja', addressdetails: '1', namedetails: '1' });
   const c = me || (map && map.getCenter && [map.getCenter().lat, map.getCenter().lng]);
   if (c) p.set('viewbox', [c[1] - .3, c[0] + .3, c[1] + .3, c[0] - .3].join(','));
   const res = await fetch('https://nominatim.openstreetmap.org/search?' + p);
@@ -1121,7 +1146,9 @@ async function findPlaces(q) {
   return list.map(r => ({
     name: r.name || String(r.display_name).split(',')[0],
     addr: String(r.display_name).split(',').slice(1, 5).join(',').trim(),
-    lat: +r.lat, lng: +r.lon, country: (r.address?.country_code || 'jp').toLowerCase()
+    lat: +r.lat, lng: +r.lon, country: (r.address?.country_code || 'jp').toLowerCase(),
+    // 韓国は NAVER で探す時に韓国語の名前を使う
+    kr: (r.address?.country_code === 'kr' && (r.namedetails?.['name:ko'] || r.namedetails?.name)) || undefined
   })).sort((a, b) => me ? meters({ lat: me[0], lng: me[1] }, a) - meters({ lat: me[0], lng: me[1] }, b) : 0);
 }
 function setupDailyAdd() {
@@ -1133,7 +1160,7 @@ function setupDailyAdd() {
     const q = $('#dQuery').value.trim();
     if (!q) { $('#dQuery').focus(); return; }
     $('#dQuery').blur();
-    $('#findTitle').textContent = `「${q}」を ${dailyLabel(data.date)} に足す`;
+    $('#findTitle').textContent = `「${q}」を ${DAILY ? dailyLabel(data.date) : (String(data.title || '').match(/\d+日目/) || [''])[0] + ' ' + dailyLabel(data.date).replace(/ (今日|明日|昨日)$/, '')} に足す`;
     $('#dTime').value = ''; $('#dMemo').value = '';
     const ul = $('#foundList');
     ul.innerHTML = '<li><small>探しています…</small></li>';
@@ -1234,9 +1261,10 @@ async function setupTrip() {
     $('#cards').innerHTML = '<p id="error">この旅行の予定を読みこめませんでした。</p>';
     return false;
   }
-  items = data.items || [];
+  items = data.items = mergeExtra(data.items || []);
   items.forEach(it => { it.t0 = it.time; it.e0 = it.end; });
   if (isTripDay()) { loadOffsets(); applyOffsets(); }
+  setupDailyAdd();   // 旅行の日にも、行きたい場所の入力枠を出す(2026-11-19 Taku)
   // ホーム画面に追加する時の名前になるので、短く「トラベラー」のまま(旅行の名前は左上に出る)
   document.title = 'トラベラー';
   $('#days').innerHTML = daysHtml(days);
@@ -1344,7 +1372,7 @@ async function main() {
 
   // 旅行の当日に開いたら、はじめから今の予定を出す
   // 日常で今足した場所は、そのカードを出す
-  const added = DAILY && store('sessionStorage', 'daily-focus');
+  const added = store('sessionStorage', 'daily-focus');
   if (added) {
     store('sessionStorage', 'daily-focus', '');
     const k = items.findIndex(it => String(it.id) === added);
