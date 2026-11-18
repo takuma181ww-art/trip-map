@@ -434,6 +434,7 @@ function goHtml(it, i) {
 }
 // カードの目安の時間を、今の出発地で書き直す(GPS が動くたびにも呼ぶ)
 function updateGoTimes() {
+  if (DAILY) updateLeaveTimes();
   document.querySelectorAll('[data-go]').forEach(box => {
     const i = +box.dataset.go, it = items[i], o = goOrigin(i);
     if (!o) return;
@@ -517,7 +518,9 @@ function cardHtml(it, i) {
     <div class="memo">${memoHtml(it.memo)}</div>
     ${hasPlace ? '' : '<div class="note">地図の印はありません</div>'}
     ${it.note ? `<div class="note">${esc(it.note)}</div>` : ''}
+    ${it.arrive ? `<div class="note">${esc(hm(it.arrive))} までに着く</div>` : ''}
     ${goHtml(it, i)}
+    ${leaveHtml(it, i)}
     ${visitHtml(it, i)}
     ${btns ? `<div class="btns">${btns}</div>` : ''}
   </article>`;
@@ -1185,8 +1188,66 @@ function setupDailyAdd() {
     if (e.target.id === 'findSheet' || e.target.closest('button')?.dataset.act === 'close') sheet.hidden = true;
   });
 }
+// ---- カレンダーなどから取り込む(2026-11-19) ----
+// リンクの #add=<base64url の JSON> で、日常の予定をまとめて足す(ショートカットや Claude がつくるリンク)。
+// 「#」より後ろはサーバーに送られないので、予定の中身はネットの向こうに出ない。
+// 形: [{ date, name, time?, arrive?, memo?, lat?, lng?, googleQuery?, note? }]。同じ日・名前・時刻はだぶらせない
+function importFromHash() {
+  const m = location.hash.match(/^#add=([A-Za-z0-9_-]+)/);
+  if (!m) return null;
+  history.replaceState(null, '', location.pathname + location.search);
+  let list;
+  try {
+    const b = atob(m[1].replace(/-/g, '+').replace(/_/g, '/'));
+    list = JSON.parse(new TextDecoder().decode(Uint8Array.from(b, c => c.charCodeAt(0))));
+  } catch (e) { toast('取り込むデータを読めませんでした'); return null; }
+  if (!Array.isArray(list)) return null;
+  const all = loadDaily();
+  let n = 0, first = null;
+  list.forEach((x, k) => {
+    if (!x || !/^\d{4}-\d{2}-\d{2}$/.test(x.date || '') || !x.name) return;
+    const day = all[x.date] = all[x.date] || [];
+    if (day.some(o => o.name === x.name && (o.time || '') === (x.time || ''))) return;
+    day.push({ id: Date.now() + k, name: String(x.name), time: x.time || '', arrive: x.arrive || '', memo: x.memo || '',
+               lat: x.lat ?? null, lng: x.lng ?? null, country: x.country || 'jp',
+               ...(x.googleQuery ? { googleQuery: x.googleQuery } : {}), ...(x.note ? { note: x.note } : {}), from: 'calendar' });
+    n++; first = first || x.date;
+  });
+  saveDaily(all);
+  return { n, date: first };
+}
+// ---- 何時に出ればいい?(日常で、場所と時刻のある予定) ----
+// 着きたい時刻(arrive、なければ time)から、今いる所からの移動の目安と余裕10分を引く。
+// 直線距離からの目安なので、ぴったりの時間は「Google マップの経路」で確かめる
+const LEAVE_BUFFER = 10;
+function leaveMins(d) {
+  if (d <= 1200) return { how: '歩いて', m: Math.round(d * 1.3 / 75) };
+  return { how: '電車で', m: Math.round(10 + d * 1.25 / 900) };
+}
+function leaveHtml(it, i) {
+  if (!DAILY || !isPlace(it) || !(it.arrive || it.time)) return '';
+  const dir = 'https://www.google.com/maps/dir/?api=1&travelmode=transit&destination=' +
+              (it.googleQuery ? encodeURIComponent(it.googleQuery) : it.lat + ',' + it.lng);
+  return `<div class="go" data-leave="${i}"><div class="go-label">出る時刻:現在地が分かると出ます(📍)</div>
+    <div class="go-btns"><a href="${dir}" target="_blank" rel="noopener">🚇 Google マップの経路で確かめる</a></div></div>`;
+}
+function updateLeaveTimes() {
+  document.querySelectorAll('[data-leave]').forEach(box => {
+    const it = items[+box.dataset.leave];
+    if (!me) return;
+    const goal = it.arrive || it.time, d = map.distance(me, [it.lat, it.lng]), t = leaveMins(d);
+    const leave = toMin(goal) - t.m - LEAVE_BUFFER, late = data.date === todayStr() && leave < nowMin();
+    box.querySelector('.go-label').innerHTML =
+      `<b style="color:var(--accent);font-size:15px">${late ? 'もう出る時間です' : `${hm(toHM(leave))} に出る`}</b> ` +
+      `(${hm(goal)} に着くには・${t.how}約${Math.max(1, t.m)}分+余裕${LEAVE_BUFFER}分・目安)`;
+  });
+}
+
 function setupDaily() {
   DAILY = true;
+  const got = importFromHash();
+  if (got?.n) { store('sessionStorage', 'daily-imported', String(got.n)); if (got.date && got.date !== (Q.get('date') || todayStr())) { location.replace(dailyHref(got.date)); return false; } }
+  else if (got) toast('もう入っている予定でした');
   const date = /^\d{4}-\d{2}-\d{2}$/.test(Q.get('date') || '') ? Q.get('date') : todayStr();
   $('.trip-pick').hidden = true;
   $('#addTrip').hidden = true;   // 日常は上の欄で足す
@@ -1283,7 +1344,7 @@ async function main() {
   const tripToday = trips.some(t => !t.draft && t.start <= today && today <= (t.end || t.start));
   const mode = Q.get('mode') || (TRIP_PARAM || DAY_PARAM ? 'trip' : null) ||
                (tripToday ? 'trip' : null) || store('localStorage', MODE_KEY) || 'daily';
-  if (mode === 'daily') setupDaily();
+  if (mode === 'daily' && setupDaily() === false) return;   // 取り込んだ予定の日へ開き直す時
   setupModeTabs();
   if (!DAILY && !(await setupTrip())) return;
 
@@ -1371,6 +1432,8 @@ async function main() {
   });
 
   // 旅行の当日に開いたら、はじめから今の予定を出す
+  const imported = DAILY && store('sessionStorage', 'daily-imported');
+  if (imported) { store('sessionStorage', 'daily-imported', ''); setTimeout(() => toast(`カレンダーから ${imported} 件取り込みました`), 300); }
   // 日常で今足した場所は、そのカードを出す
   const added = store('sessionStorage', 'daily-focus');
   if (added) {
