@@ -284,10 +284,39 @@
   .fare-day { display: flex; justify-content: space-between; font-size: 13px; font-weight: 700; padding: 6px 0 0; }
   .fare-src { font-size: 11px; color: var(--sub); line-height: 1.5; margin-top: 10px; }
   .fare-src a { color: var(--sub); }
+  /* 旅行と日常の切りかえ(タブ。上の帯を左右にスワイプしても切りかわる) */
+  .mode-tabs { flex: 1 0 100%; display: flex; background: var(--chip); border-radius: 10px; padding: 3px; }
+  .mode-tabs a {
+    flex: 1; text-align: center; text-decoration: none; padding: 6px 0; border-radius: 8px;
+    color: var(--sub); font-size: 14px; font-weight: 700;
+  }
+  .mode-tabs a.on { background: var(--card); color: var(--text); box-shadow: 0 1px 4px rgba(0,0,0,.12); }
+  /* 日常の画面: 左上は今日の日付 */
+  .day-title { flex: 1; min-width: 0; font-size: 18px; font-weight: 800; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .day-title small { font-size: 12px; font-weight: 700; color: var(--accent); margin-left: 6px; }
+  /* 行きたい場所の入力(カードの上にいつも出す) */
+  #dailyAdd { display: flex; gap: 8px; padding: 8px 16px 0; }
+  #dailyAdd[hidden] { display: none; }
+  #dailyAdd input {
+    flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--text);
+    font-family: inherit; font-size: 16px; padding: 9px 10px;
+  }
+  #dailyAdd button {
+    flex: 0 0 auto; border: 0; border-radius: 10px; padding: 0 14px; background: var(--accent); color: #fff;
+    font-family: inherit; font-size: 14px; font-weight: 700;
+  }
+  .found li { cursor: pointer; flex-direction: column; gap: 2px; }
+  .found li b { font-size: 15px; }
+  .found li small { color: var(--sub); font-size: 12px; line-height: 1.4; }
+  .found li.plain b { color: var(--accent); }
 </style>
 </head>
 <body>
 <header>
+  <nav class="mode-tabs" id="modeTabs" aria-label="旅行と日常の切りかえ">
+    <a href="?mode=trip" data-mode="trip">✈︎ 旅行</a><a href="?mode=daily" data-mode="daily">🏠 日常</a>
+  </nav>
+  <div class="day-title" id="dayTitle" hidden></div>
   <div class="trip-pick"><select id="tripSel" aria-label="旅行の切りかえ"><option>読みこみ中…</option></select></div>
   <button class="add-btn" id="addTrip" type="button" aria-label="新しい旅行を足す" title="新しい旅行を足す">＋</button>
   <button class="now-btn" id="nowBtn" type="button">今ここ</button>
@@ -298,6 +327,10 @@
 </header>
 <div id="map" role="region" aria-label="地図"></div>
 <div id="panel">
+  <form id="dailyAdd" hidden autocomplete="off">
+    <input id="dQuery" type="search" enterkeyhint="search" placeholder="行きたい場所を入れる(例: 駅前のパン屋)" maxlength="80" aria-label="行きたい場所">
+    <button type="submit">探す</button>
+  </form>
   <div id="dots" aria-hidden="true"></div>
   <div id="cards" role="list"></div>
 </div>
@@ -333,6 +366,19 @@
   </div>
 </div>
 <div id="fareSheet" class="sheet-wrap" hidden><div class="sheet" role="dialog" aria-label="交通費の見積もり"></div></div>
+<div id="findSheet" class="sheet-wrap" hidden>
+  <div class="sheet" role="dialog" aria-label="行きたい場所を足す">
+    <h2 id="findTitle">行きたい場所を足す</h2>
+    <label for="dTime">時間(なくてもよい)</label>
+    <input id="dTime" type="time">
+    <label for="dMemo">メモ(なくてもよい)</label>
+    <input id="dMemo" maxlength="200" placeholder="例: 11時開店・テイクアウト">
+    <h3>どこですか?(押すと足します)</h3>
+    <ul class="found" id="foundList"></ul>
+    <p class="hint">この iPhone の中だけに保存します(公開のページには出ません)。</p>
+    <div class="row"><button type="button" data-act="close">やめる</button></div>
+  </div>
+</div>
 <script>
 // 旅行の一覧 data/trips.json と、旅行ごとの data/trips/<id>/day1.json, day2.json … を読む。
 // ?trip=<id>&day=day2 で開くとその旅行のその日。前のリンク(?day=day2 だけ)は、ふつうに開いた時と同じ旅行を出す。
@@ -349,6 +395,7 @@ let data, items = [], markers = {}, stationLayers = {}, active = -1, map;
 let offsets = [];
 let me = null, meMarker = null, meCircle = null, watching = false;  // 自分の位置(GPS)
 let allDays = [];
+let DAILY = false;   // 日常の画面か(旅行の画面と同じ地図とカードで、その日の行きたい場所を出す)
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -463,8 +510,8 @@ function cardHtml(it, i) {
   return `<article class="card" role="listitem" data-i="${i}">
     <div class="card-head">
       <div class="num ${hasPlace ? '' : 'plain'}">${it.no ?? ''}</div>
-      <div class="time">${hm(it.time)}${wasHtml(i)}</div>
-      ${shiftBtn(i, 'ここから再開')}
+      <div class="time">${it.time ? hm(it.time) : DAILY ? '<span class="was">時間なし</span>' : ''}${wasHtml(i)}</div>
+      ${DAILY ? `<button class="shift-btn" type="button" data-del="${i}">消す</button>` : shiftBtn(i, 'ここから再開')}
     </div>
     <div class="name">${esc(it.name)}</div>
     <div class="memo">${memoHtml(it.memo)}</div>
@@ -560,7 +607,7 @@ const isTripDay = () => data && data.date === todayStr();
 const shiftKey = () => 'trip-shift:' + data.date;
 
 function shiftBtn(i, label) {
-  return isTripDay() ? `<button class="shift-btn" type="button" data-shift="${i}">${label}</button>` : '';
+  return isTripDay() && !DAILY ?`<button class="shift-btn" type="button" data-shift="${i}">${label}</button>` : '';
 }
 function wasHtml(i) {
   return offsets[i] ? `<span class="was">予定 ${hm(items[i].t0)}</span>` : '';
@@ -604,6 +651,8 @@ function startWatch() {
       meCircle = L.circle(me, { radius: acc, color: '#1a73e8', weight: 1, opacity: .4, fillOpacity: .12, interactive: false }).addTo(map);
       meMarker = L.marker(me, { icon: L.divIcon({ className: '', html: '<div class="me-dot"></div>', iconSize: [22, 22], iconAnchor: [11, 11] }),
         zIndexOffset: 2000, keyboard: false, title: '現在地' }).addTo(map);
+      // 日常で場所がまだない日は、自分のまわりを出す
+      if (DAILY && !places().length) map.setView(me, 15);
     } else { meMarker.setLatLng(me); meCircle.setLatLng(me).setRadius(acc); }
     autoVisit(pos);
     if (!updateGoTimes.t) updateGoTimes.t = setTimeout(() => { updateGoTimes.t = 0; updateGoTimes(); }, 3000);
@@ -628,6 +677,13 @@ function addLocateButton() {
 }
 
 function renderCards() {
+  if (!items.length && DAILY) {
+    $('#cards').innerHTML = `<article class="card empty-card on" role="listitem">
+      <div class="name">${esc(dailyLabel(data.date))}の行きたい場所</div>
+      <p>まだありません。上の欄に行きたい場所を入れて「探す」を押すと、地図とカードに出ます。\n時間やメモも付けられます。</p>
+    </article>`;
+    return;
+  }
   if (!items.length) {
     $('#cards').innerHTML = emptyCardHtml(allDays);
     $('#cards [data-act="del"]')?.addEventListener('click', deleteDraft);
@@ -645,6 +701,7 @@ function renderCards() {
     openNaver(items[i].stations[j], e);
   }));
   document.querySelectorAll('[data-shift]').forEach(b => b.addEventListener('click', () => shiftFrom(+b.dataset.shift)));
+  document.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', () => deleteDaily(+b.dataset.del)));
   document.querySelectorAll('[data-route]').forEach(a => a.addEventListener('click', e => {
     const [i, mode] = a.dataset.route.split(':'); openRoute(+i, mode, e);
   }));
@@ -677,7 +734,9 @@ function focus(i) {
 }
 // 予定の場所がまだない時は、日本と韓国が入るくらいに
 function fitAll() {
-  if (places().length) map.fitBounds(allBounds(), { padding: [30, 30] });
+  if (places().length === 1) map.setView([places()[0].lat, places()[0].lng], 15);
+  else if (places().length) map.fitBounds(allBounds(), { padding: [30, 30] });
+  else if (DAILY) map.setView([35.68, 139.76], 11);   // 日常は自分の位置が分かるまで東京のあたり
   else map.setView([36.0, 133.5], 5);
 }
 
@@ -866,6 +925,7 @@ function nowIndex() {
   const isDay = today === data.date;
   let idx = 0;
   items.forEach((it, i) => {
+    if (!it.time) return;   // 日常の「時間なし」の予定
     const [h, m] = it.time.split(':').map(Number);
     if (h * 60 + m <= mins) idx = i;
   });
@@ -1006,10 +1066,146 @@ function setupTools() {
   });
 }
 
-async function main() {
-  setupAddSheet();
-  setupTools();
-  trips = await loadTrips();
+// ---- 日常の画面(2026-11-19 Taku「日常の毎日の生活で使えるもう一画面」) ----
+// 旅行と同じ地図とカード。開くといつも今日の日付で、上の欄に行きたい場所を入れて足す。
+// 公開のページなので、日常の行き先はその端末の中(localStorage)だけに残す(data/ には入れない)。
+const DAILY_KEY = 'daily-plans';   // { "2026-11-19": [{ id, name, time, memo, lat, lng, country, kr? }] }
+const MODE_KEY = 'trip-mode';
+function loadDaily() { try { const v = JSON.parse(localStorage.getItem(DAILY_KEY) || '{}'); return v && typeof v === 'object' ? v : {}; } catch (e) { return {}; } }
+function saveDaily(v) { try { localStorage.setItem(DAILY_KEY, JSON.stringify(v)); return true; } catch (e) { return false; } }
+function dailyLabel(date) {
+  const t = todayStr(), [, m, d] = date.split('-').map(Number);
+  const rel = date === t ? '今日' : date === addDays(t, 1) ? '明日' : date === addDays(t, -1) ? '昨日' : '';
+  return `${m}月${d}日(${weekdayOf(date)})` + (rel ? ` ${rel}` : '');
+}
+const dailyHref = date => `?mode=daily&date=${encodeURIComponent(date)}`;
+// 時間のある予定を時刻の順に、時間なしはそのあと(足した順)
+function dailyItems(date) {
+  const list = (loadDaily()[date] || []).map(x => ({ ...x }));
+  list.sort((a, b) => (a.time ? 0 : 1) - (b.time ? 0 : 1) || (a.time || '').localeCompare(b.time || '') || a.id - b.id);
+  let no = 0;
+  list.forEach(it => { it.memo = it.memo || ''; if (it.lat != null) it.no = ++no; });
+  return list;
+}
+function deleteDaily(i) {
+  const it = items[i];
+  if (!confirm(`「${it.name}」を消しますか?`)) return;
+  const all = loadDaily();
+  all[data.date] = (all[data.date] || []).filter(x => x.id !== it.id);
+  if (!all[data.date].length) delete all[data.date];
+  saveDaily(all);
+  location.href = dailyHref(data.date);
+}
+function addDaily(entry) {
+  const all = loadDaily();
+  const it = { id: Date.now(), name: entry.name, time: $('#dTime').value || '', memo: $('#dMemo').value.trim(),
+               lat: entry.lat ?? null, lng: entry.lng ?? null, country: entry.country || 'jp' };
+  if (entry.kr) it.kr = entry.kr;
+  (all[data.date] = all[data.date] || []).push(it);
+  if (!saveDaily(all)) { toast('この端末に保存できませんでした(プライベートブラウズ?)'); return; }
+  store('sessionStorage', 'daily-focus', String(it.id));
+  location.href = dailyHref(data.date);
+}
+// 場所さがしは OpenStreetMap の Nominatim(キー不要)。今いる所の近くを先に出す
+async function findPlaces(q) {
+  // 「35.68, 139.76」のように座標を貼った時はそのまま使う
+  const ll = q.match(/(-?\d{1,2}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)/);
+  if (ll) return [{ name: q.replace(ll[0], '').trim() || '指定した場所', addr: `${ll[1]}, ${ll[2]}`, lat: +ll[1], lng: +ll[2], country: 'jp' }];
+  const p = new URLSearchParams({ q, format: 'jsonv2', limit: '8', 'accept-language': 'ja', addressdetails: '1' });
+  const c = me || (map && map.getCenter && [map.getCenter().lat, map.getCenter().lng]);
+  if (c) p.set('viewbox', [c[1] - .3, c[0] + .3, c[1] + .3, c[0] - .3].join(','));
+  const res = await fetch('https://nominatim.openstreetmap.org/search?' + p);
+  if (!res.ok) throw new Error('search');
+  const list = (await res.json()).filter((r, k, a) =>   // 同じ名前ですぐ近く(100m)の重なりは1つに
+    a.findIndex(o => o.name === r.name && meters({ lat: +o.lat, lng: +o.lon }, { lat: +r.lat, lng: +r.lon }) < 100) === k);
+  return list.map(r => ({
+    name: r.name || String(r.display_name).split(',')[0],
+    addr: String(r.display_name).split(',').slice(1, 5).join(',').trim(),
+    lat: +r.lat, lng: +r.lon, country: (r.address?.country_code || 'jp').toLowerCase()
+  })).sort((a, b) => me ? meters({ lat: me[0], lng: me[1] }, a) - meters({ lat: me[0], lng: me[1] }, b) : 0);
+}
+function setupDailyAdd() {
+  const f = $('#dailyAdd'), sheet = $('#findSheet');
+  let found = [];
+  f.hidden = false;
+  f.addEventListener('submit', async e => {
+    e.preventDefault();
+    const q = $('#dQuery').value.trim();
+    if (!q) { $('#dQuery').focus(); return; }
+    $('#dQuery').blur();
+    $('#findTitle').textContent = `「${q}」を ${dailyLabel(data.date)} に足す`;
+    $('#dTime').value = ''; $('#dMemo').value = '';
+    const ul = $('#foundList');
+    ul.innerHTML = '<li><small>探しています…</small></li>';
+    sheet.hidden = false;
+    try { found = await findPlaces(q); } catch (err) { found = []; }
+    const g = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(q);
+    ul.innerHTML = found.map((r, k) => `<li data-k="${k}"><b>${esc(r.name)}</b><small>${esc(r.addr)}${me ? `・約${(meters({ lat: me[0], lng: me[1] }, r) / 1000).toFixed(1)}km` : ''}</small></li>`).join('') +
+      (found.length ? '' : '<li><small>地図の上では見つかりませんでした。下の「場所なしで足す」か、Google マップで探してください。</small></li>') +
+      `<li class="plain" data-k="-1"><b>＋ 場所なしで足す</b><small>「${esc(q)}」をメモとして足す(地図の印は付きません)</small></li>` +
+      `<li class="plain" data-g="1"><b>Google マップで探す</b><small>見つからない時に。見つけたら座標(35.68, 139.76 の形)をコピーして上の欄に貼れます</small></li>`;
+    ul.dataset.q = q; ul.dataset.g = g;
+  });
+  $('#foundList').addEventListener('click', e => {
+    const li = e.target.closest('li');
+    if (!li) return;
+    if (li.dataset.g) { window.open(e.currentTarget.dataset.g, '_blank', 'noopener'); return; }
+    if (li.dataset.k == null) return;
+    const k = +li.dataset.k;
+    addDaily(k < 0 ? { name: e.currentTarget.dataset.q } : found[k]);
+  });
+  sheet.addEventListener('click', e => {
+    if (e.target.id === 'findSheet' || e.target.closest('button')?.dataset.act === 'close') sheet.hidden = true;
+  });
+}
+function setupDaily() {
+  DAILY = true;
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(Q.get('date') || '') ? Q.get('date') : todayStr();
+  $('.trip-pick').hidden = true;
+  $('#addTrip').hidden = true;   // 日常は上の欄で足す
+  $('#dayTitle').hidden = false;
+  $('#dayTitle').innerHTML = esc(dailyLabel(date).replace(/ (今日|明日|昨日)$/, '')) +
+    (/ (今日|明日|昨日)$/.test(dailyLabel(date)) ? `<small>${dailyLabel(date).split(' ').pop()}</small>` : '');
+  // 日の切りかえ: 昨日〜1週間後
+  const t = todayStr(), all = loadDaily();
+  const dates = Array.from({ length: 8 }, (_, n) => addDays(t, n - 1));
+  if (!dates.includes(date)) dates.push(date);
+  $('#days').innerHTML = dates.map(d => {
+    const [, m, dd] = d.split('-').map(Number);
+    const rel = d === t ? '今日 ' : d === addDays(t, 1) ? '明日 ' : '';
+    const n = (all[d] || []).length;
+    return `<a href="${dailyHref(d)}" class="${d === date ? 'on' : ''}"${d === date ? ' aria-current="page"' : ''}>${rel}${m}/${dd}(${weekdayOf(d)})${n ? ` ・${n}` : ''}</a>`;
+  }).join('');
+  items = dailyItems(date);
+  data = { title: '日常', date, weekday: weekdayOf(date), items };
+  allDays = [{ id: date, data }];
+  items.forEach(it => { it.t0 = it.time; it.e0 = it.end; });
+  setupDailyAdd();
+  $('#nowBtn').textContent = date === t ? '今ここ' : '今日へ';
+  return true;
+}
+// 旅行 ↔ 日常: タブを押すか、上の帯を左右にスワイプ。最後に開いた方を覚える
+function setupModeTabs() {
+  document.querySelectorAll('#modeTabs a').forEach(a => {
+    a.classList.toggle('on', (a.dataset.mode === 'daily') === DAILY);
+    a.addEventListener('click', () => store('localStorage', MODE_KEY, a.dataset.mode));
+  });
+  let x0 = null, y0 = 0;
+  const go = mode => { if ((mode === 'daily') === DAILY) return; store('localStorage', MODE_KEY, mode); location.href = '?mode=' + mode; };
+  $('header').addEventListener('touchstart', e => {
+    if (e.target.closest('#days, select, input')) { x0 = null; return; }
+    x0 = e.touches[0].clientX; y0 = e.touches[0].clientY;
+  }, { passive: true });
+  $('header').addEventListener('touchend', e => {
+    if (x0 == null) return;
+    const dx = e.changedTouches[0].clientX - x0, dy = e.changedTouches[0].clientY - y0;
+    x0 = null;
+    if (Math.abs(dx) > 60 && Math.abs(dy) < 40) go(dx < 0 ? 'daily' : 'trip');
+  }, { passive: true });
+}
+
+// 旅行の画面の読みこみ(旅行を選び、その日の予定を items に入れる)。出せない時は false
+async function setupTrip() {
   trip = pickTrip(trips);
   const sel = $('#tripSel');
   sel.innerHTML = tripOptions(trips) || '<option>旅行がまだありません</option>';
@@ -1020,7 +1216,7 @@ async function main() {
   });
   if (!trip) {
     $('#cards').innerHTML = '<p id="error">旅行がまだありません。右上の ＋ で足せます。</p>';
-    return;
+    return false;
   }
   store('localStorage', 'trip-last-trip', trip.id);
   const days = await loadDays(trip);
@@ -1036,7 +1232,7 @@ async function main() {
   data = days.find(d => d.id === DAY)?.data;
   if (!data) {
     $('#cards').innerHTML = '<p id="error">この旅行の予定を読みこめませんでした。</p>';
-    return;
+    return false;
   }
   items = data.items || [];
   items.forEach(it => { it.t0 = it.time; it.e0 = it.end; });
@@ -1047,6 +1243,21 @@ async function main() {
   $('#days .on')?.scrollIntoView({ inline: 'center', block: 'nearest' });
   document.querySelectorAll('#days a').forEach(a => a.addEventListener('click', () =>
     store('sessionStorage', 'trip-pick', trip.id + '|' + new URLSearchParams(a.search).get('day'))));
+  return true;
+}
+
+async function main() {
+  setupAddSheet();
+  setupTools();
+  trips = await loadTrips();
+  // どちらの画面で開くか: リンクの指定 → 旅行の当日は旅行 → 最後に開いた方 → 日常
+  const today = todayStr();
+  const tripToday = trips.some(t => !t.draft && t.start <= today && today <= (t.end || t.start));
+  const mode = Q.get('mode') || (TRIP_PARAM || DAY_PARAM ? 'trip' : null) ||
+               (tripToday ? 'trip' : null) || store('localStorage', MODE_KEY) || 'daily';
+  if (mode === 'daily') setupDaily();
+  setupModeTabs();
+  if (!DAILY && !(await setupTrip())) return;
 
   map = L.map('map', { zoomControl: false, attributionControl: true });
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -1055,7 +1266,7 @@ async function main() {
   }).addTo(map);
   fitAll();
   addLocateButton();
-  if (isTripDay()) startWatch();  // 旅行の当日は開いた時から自分の位置を出す
+  if (isTripDay() || DAILY) startWatch();  // 旅行の当日と日常は、開いた時から自分の位置を出す
 
   // スポットを順番に線で結ぶ。移動の区間は点線にし、乗り降りする駅があれば駅を通す。
   let prev = null, dashed = false, via = [];
@@ -1121,14 +1332,26 @@ async function main() {
   box.addEventListener('scroll', () => { clearTimeout(st); st = setTimeout(pick, 120); }, { passive: true });
 
   $('#nowBtn').addEventListener('click', () => {
+    if (DAILY && data.date !== todayStr()) { location.href = dailyHref(todayStr()); return; }
+    if (DAILY && !items.some(it => it.time)) {
+      if (me) map.flyTo(me, Math.max(map.getZoom(), 15), { duration: .8 }); else { startWatch(); toast('現在地を探しています…'); }
+      return;
+    }
     const n = nowIndex();
     setActive(n.idx, { scroll: true });
     toast(n.isDay ? 'いまの予定を表示しました' : '旅行の日ではないので、時刻だけで合わせました');
   });
 
   // 旅行の当日に開いたら、はじめから今の予定を出す
+  // 日常で今足した場所は、そのカードを出す
+  const added = DAILY && store('sessionStorage', 'daily-focus');
+  if (added) {
+    store('sessionStorage', 'daily-focus', '');
+    const k = items.findIndex(it => String(it.id) === added);
+    if (k >= 0) { setActive(k, { scroll: true, fly: false }); focus(k); toast(`「${items[k].name}」を足しました`); return; }
+  }
   const n = nowIndex();
-  if (n.isDay) setActive(n.idx, { scroll: true, fly: false }), focus(n.idx);
+  if (n.isDay && items.length) setActive(n.idx, { scroll: true, fly: false }), focus(n.idx);
   else setActive(0, { fly: false });
 }
 main();
