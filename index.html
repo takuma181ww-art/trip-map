@@ -143,7 +143,8 @@
     border: 1.5px solid transparent;
   }
   .card.on { border-color: var(--accent); }
-  .card:has(.ask) { overflow-y: auto; }   /* 行き先の候補が出ると長くなるので、カードの中で送れるように */
+  .card:has(.ask) { overflow-y: auto; }
+  body.daily .card:not(.empty-card) .card-head::after { content: '⤢'; margin-left: 6px; color: var(--sub); font-size: 16px; }   /* 押すと大きな画面 */   /* 行き先の候補が出ると長くなるので、カードの中で送れるように */
   .card-head { display: flex; align-items: center; gap: 10px; }
   .num {
     flex: 0 0 auto; width: 30px; height: 30px; border-radius: 50%;
@@ -332,6 +333,52 @@
   /* 検索シートを「行き先を決める」形で開いた時は、時間・メモ・カレンダー・場所なしで足すを隠す */
   #findSheet.assign label[for="dTime"], #findSheet.assign #dTime, #findSheet.assign label[for="dMemo"], #findSheet.assign #dMemo,
   #findSheet.assign #calPickBox, #findSheet.assign li[data-k="-1"] { display: none; }
+  /* 1日の予定(大きな画面)。スマホは上に地図・下にリスト、広い画面は左にリスト・右に地図 */
+  #planner { position: fixed; inset: 0; z-index: 2600; background: var(--bg); display: flex; flex-direction: column; }
+  #planner[hidden] { display: none; }
+  .pl-head { display: flex; align-items: center; gap: 8px; padding: calc(env(safe-area-inset-top) + 8px) 16px 8px; border-bottom: 1px solid var(--line); }
+  .pl-title { flex: 1; min-width: 0; font-size: 18px; font-weight: 800; }
+  #plClose { border: 0; border-radius: 999px; padding: 8px 14px; background: var(--chip); color: var(--text); font-family: inherit; font-size: 14px; font-weight: 700; }
+  .pl-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  #plMap { flex: 0 0 38%; order: -1; background: var(--chip); }
+  .pl-list { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 16px calc(env(safe-area-inset-bottom) + 16px); }
+  @media (min-width: 760px) {
+    .pl-body { flex-direction: row; }
+    .pl-list { flex: 0 0 420px; border-right: 1px solid var(--line); }
+    #plMap { flex: 1; order: 0; }
+  }
+  #plAdd { display: flex; gap: 8px; }
+  #plAdd input, .pl-opts input, .pl-opts select {
+    border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--text); font-family: inherit; font-size: 16px; padding: 8px 10px;
+  }
+  #plAdd input { flex: 1; min-width: 0; }
+  #plAdd button { border: 0; border-radius: 10px; padding: 0 14px; background: var(--accent); color: #fff; font-family: inherit; font-size: 14px; font-weight: 700; }
+  .pl-opts { display: flex; gap: 8px; margin-top: 8px; font-size: 12px; color: var(--sub); font-weight: 700; }
+  .pl-opts label { display: flex; align-items: center; gap: 4px; flex: 1; min-width: 0; }
+  .pl-opts input, .pl-opts select { flex: 1; min-width: 0; font-size: 14px; padding: 6px 8px; }
+  #plAssignNote { margin-top: 8px; font-size: 13px; font-weight: 700; color: var(--accent); }
+  .pl-h { font-size: 13px; font-weight: 800; color: var(--sub); margin: 14px 0 6px; }
+  .pl-row { display: flex; gap: 10px; padding: 10px; border-radius: 12px; background: var(--card); margin-bottom: 8px; border: 1.5px solid transparent; box-shadow: var(--shadow); }
+  .pl-row.on { border-color: var(--accent); }
+  .pl-time { flex: 0 0 44px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .pl-main { flex: 1; min-width: 0; }
+  .pl-name { font-weight: 700; line-height: 1.35; }
+  .pl-no { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 11px; margin-right: 4px; vertical-align: 1px; }
+  .pl-main > small { display: block; color: var(--sub); font-size: 12px; margin-top: 2px; }
+  .pl-cands { margin-top: 6px; display: flex; flex-direction: column; gap: 6px; }
+  .pl-cands > small { color: var(--sub); font-size: 12px; }
+  .pl-cand { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; border: 1.5px solid var(--line); background: var(--chip); color: var(--text); border-radius: 10px; padding: 7px 8px; font-family: inherit; }
+  .pl-cand.top { border-color: var(--accent); }
+  .pl-cand > span:nth-child(2) { flex: 1; min-width: 0; }
+  .pl-cand b { display: block; font-size: 14px; }
+  .pl-cand small { display: block; font-size: 11px; color: var(--sub); }
+  .pl-pick { flex: 0 0 auto; font-size: 12px; font-weight: 800; color: var(--accent); }
+  .pin-l { flex: 0 0 auto; width: 22px; height: 22px; border-radius: 50%; background: #868e96; color: #fff; display: grid; place-items: center; font-size: 12px; font-weight: 800; }
+  .pin-l.blue { background: #1a73e8; }
+  .pl-acts { display: flex; gap: 6px; }
+  .pl-acts button { flex: 1; border: 1px solid var(--line); background: var(--card); color: var(--text); border-radius: 999px; padding: 6px; font-family: inherit; font-size: 12px; font-weight: 700; }
+  .pin.cand { background: #868e96; border-color: #fff; color: #fff; }
+  .pin.found { background: #1a73e8; border-color: #fff; color: #fff; }
   .found li { cursor: pointer; flex-direction: column; gap: 2px; }
   .found li b { font-size: 15px; }
   .found li small { color: var(--sub); font-size: 12px; line-height: 1.4; }
@@ -394,6 +441,21 @@
   </div>
 </div>
 <div id="fareSheet" class="sheet-wrap" hidden><div class="sheet" role="dialog" aria-label="交通費の見積もり"></div></div>
+<!-- 1日の予定(大きな画面)。カードを押すと開く -->
+<div id="planner" hidden role="dialog" aria-label="1日の予定">
+  <div class="pl-head"><div class="pl-title" id="plTitle"></div><button type="button" id="plClose">閉じる</button></div>
+  <div class="pl-body">
+    <div class="pl-list">
+      <form id="plAdd" autocomplete="off"><input id="plQ" type="search" enterkeyhint="search" placeholder="行きたい場所を探して足す" aria-label="行きたい場所を探す"><button type="submit">探す</button></form>
+      <div class="pl-opts"><label>時間<input id="plTime" type="time"></label><label>入れる所<select id="plCal"></select></label></div>
+      <div id="plAssignNote" hidden></div>
+      <div id="plFound"></div>
+      <div class="pl-h">この日の予定</div>
+      <div id="plRows"></div>
+    </div>
+    <div id="plMap"></div>
+  </div>
+</div>
 <div id="findSheet" class="sheet-wrap" hidden>
   <div class="sheet" role="dialog" aria-label="行きたい場所を足す">
     <h2 id="findTitle">行きたい場所を足す</h2>
@@ -717,6 +779,7 @@ function renderCards() {
     $('#cards').innerHTML = `<article class="card empty-card on" role="listitem">
       <div class="name">${esc(dailyLabel(data.date))}の行きたい場所</div>
       <p>まだありません。上の欄に行きたい場所を入れて「探す」を押すと、地図とカードに出ます。\n時間やメモも付けられます。</p>
+      <div class="row"><button type="button" class="main" data-big="1">大きな画面で1日の予定を組む</button></div>
     </article>`;
     return;
   }
@@ -1205,10 +1268,17 @@ async function findPlaces(q) {
   if (ll) return [{ name: q.replace(ll[0], '').trim() || '指定した場所', addr: `${ll[1]}, ${ll[2]}`, lat: +ll[1], lng: +ll[2], country: 'jp' }];
   const c0 = me || (map && map.getCenter && [map.getCenter().lat, map.getCenter().lng]);
   const near = list => c0 ? list.sort((a, b) => meters({ lat: c0[0], lng: c0[1] }, a) - meters({ lat: c0[0], lng: c0[1] }, b)) : list;
+  // 同じ言葉はこの画面を開いている間は探し直さない(カードと大きな画面で同じ候補を使う・Google の回数の節約)
+  const ck = q + '|' + (c0 ? c0.map(v => v.toFixed(2)).join(',') : '');
+  if (findPlaces.cache.has(ck)) return findPlaces.cache.get(ck);
   const usedKey = 'places-used:' + todayStr(), used = +(store('localStorage', usedKey) || 0);
   if (PLACES_KEY && used < PLACES_DAILY_MAX) {
     store('localStorage', usedKey, String(used + 1));
-    try { return near(await findPlacesGoogle(q, c0)); } catch (e) { /* 下の OpenStreetMap で探す */ }
+    try { const r = near(await findPlacesGoogle(q, c0)); findPlaces.cache.set(ck, r); return r; } catch (e) { /* 下の OpenStreetMap で探す */ }
+  } else if (PLACES_KEY && !findPlaces.told) {
+    // 歯止めに届いた日は、その日だけ無料の地図で探す(足りない日が続くなら、月の枠に変える相談を)
+    findPlaces.told = true;
+    toast(`今日の Google の検索が ${PLACES_DAILY_MAX}回に届いたので、無料の地図で探しています`);
   }
   const p = new URLSearchParams({ q, format: 'jsonv2', limit: '8', 'accept-language': 'ja', addressdetails: '1', namedetails: '1' });
   const c = me || (map && map.getCenter && [map.getCenter().lat, map.getCenter().lng]);
@@ -1225,6 +1295,7 @@ async function findPlaces(q) {
     kr: (r.address?.country_code === 'kr' && (r.namedetails?.['name:ko'] || r.namedetails?.name)) || undefined
   })).sort((a, b) => me ? meters({ lat: me[0], lng: me[1] }, a) - meters({ lat: me[0], lng: me[1] }, b) : 0);
 }
+findPlaces.cache = new Map();
 function setupDailyAdd() {
   const f = $('#dailyAdd'), sheet = $('#findSheet');
   let found = [];
@@ -1483,7 +1554,7 @@ async function fillAskPlaces() {
     await new Promise(r => setTimeout(r, 1100));
   }
 }
-async function setEventPlace(i, place) {
+async function setEventPlace(i, place, stay = false) {
   const it = items[i];
   if (!it.canWrite) {   // 読むだけのカレンダーは書き戻せないので、この端末に覚える
     const v = loadPlaceFix(); v[it.eventId] = { lat: place.lat, lng: place.lng, q: `${place.name} ${place.addr || ''}`.trim() };
@@ -1493,28 +1564,37 @@ async function setEventPlace(i, place) {
       await gapi(`calendars/${encodeURIComponent(it.calId)}/events/${encodeURIComponent(it.eventId)}`, { method: 'PATCH', body: JSON.stringify({
         location: `${place.name} ${place.addr || ''}`.trim(),
         extendedProperties: { private: { lat: String(place.lat), lng: String(place.lng) } } }) });
-    } catch (e) { toast(e.auth ? 'カレンダーとのつながりが切れました。もう一度つないでください' : 'カレンダーに書けませんでした'); return; }
+    } catch (e) { toast(e.auth ? 'カレンダーとのつながりが切れました。もう一度つないでください' : 'カレンダーに書けませんでした'); return false; }
   }
-  store('sessionStorage', 'daily-focus', it.id);
   toast(`「${place.name}」を行き先にしました`);
+  if (stay) { it.lat = place.lat; it.lng = place.lng; it.googleQuery = `${place.name} ${place.addr || ''}`.trim(); return true; }
+  store('sessionStorage', 'daily-focus', it.id);
   location.href = dailyHref(data.date);
+  return true;
 }
-async function setEventNoPlace(i) {
+async function setEventNoPlace(i, stay = false) {
   const it = items[i];
   if (it.canWrite) {
     try { await gapi(`calendars/${encodeURIComponent(it.calId)}/events/${encodeURIComponent(it.eventId)}`, { method: 'PATCH', body: JSON.stringify({ extendedProperties: { private: { noPlace: '1' } } }) }); }
-    catch (e) { toast('カレンダーに書けませんでした'); return; }
+    catch (e) { toast('カレンダーに書けませんでした'); return false; }
   } else {
     const v = loadPlaceFix(); v[it.eventId] = { lat: null, lng: null, q: '' };
     try { localStorage.setItem(PLACEFIX_KEY, JSON.stringify(v)); } catch (e) {}
   }
+  if (stay) { it.noPlace = true; return true; }
   store('sessionStorage', 'daily-focus', it.id);
   location.href = dailyHref(data.date);
 }
 function bindAskPlaces() {
   $('#cards').addEventListener('click', e => {
     const a = e.target.closest('[data-cand], [data-askmore], [data-asknone]');
-    if (!a) return;
+    if (!a) {
+      if (DAILY && e.target.closest('[data-big]')) { openPlanner(null); return; }
+      if (!DAILY || e.target.closest('a, button, input, select, textarea')) return;
+      const card = e.target.closest('.card');
+      if (card) openPlanner(card.dataset.i != null ? +card.dataset.i : null);
+      return;
+    }
     e.preventDefault();
     if (a.dataset.cand) {
       const [i, k] = a.dataset.cand.split(':').map(Number);
@@ -1530,9 +1610,187 @@ function bindAskPlaces() {
   });
 }
 
+// ---- 1日の予定(大きな画面)(2026-11-19 Taku「カードを押すと大きく・候補を地図とリストで・1日の予定をまとめて組む」) ----
+// その日の予定を全部並べ、場所のない予定はその場で候補から決め、探した場所を続けて足せる。閉じると、いつもの画面を読み直す
+let plMap = null, plLayer = null, plFound = [], plCands = {}, plDirty = false, plSel = null, plAssign = null;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const LETTERS = 'ABCDEFGH';
+const distTxt = r => me ? `・約${(meters({ lat: me[0], lng: me[1] }, r) / 1000).toFixed(1)}km` : '';
+function openPlanner(focus = null) {
+  if (!DAILY) return;
+  $('#planner').hidden = false;
+  $('#plTitle').textContent = dailyLabel(data.date) + ' の予定';
+  const canAdd = gcalCals.filter(c => c.canWrite), last = store('localStorage', CALPICK_KEY);
+  $('#plCal').innerHTML = canAdd.map(c => `<option value="${esc(c.id)}">${esc(c.label)}</option>`).join('') + '<option value="">この端末だけ</option>';
+  $('#plCal').value = canAdd.some(c => c.id === last) || last === '' ? last : (canAdd.find(c => c.primary) || canAdd[0] || { id: '' }).id;
+  if (!plMap) {
+    plMap = L.map('plMap', { zoomControl: false });
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' }).addTo(plMap);
+    plLayer = L.layerGroup().addTo(plMap);
+  }
+  plSel = focus;
+  setTimeout(() => { plMap.invalidateSize(); renderPlanner(); }, 60);
+}
+function closePlanner() {
+  $('#planner').hidden = true;
+  if (plDirty) location.href = dailyHref(data.date);   // 足した・決めたものをいつもの画面にも出す
+}
+function plRowHtml(it, i) {
+  const badge = it.gcal ? `<span class="badge ${it.cal === 'ファミリー' ? 'fam' : it.cal === '個人' ? 'me' : ''}">${esc(it.cal)}</span> ` : '';
+  const where = it.lat != null ? `<small>📍 ${esc(it.googleQuery || it.addr || '地図に印あり')}</small>` : it.noPlace ? '<small>場所なし</small>' : '';
+  let ask = '';
+  if (needsPlace(it)) {
+    const f = plCands[i];
+    ask = `<div class="pl-cands">${f === undefined ? '<small>行き先の候補を探しています…</small>'
+      : f.length ? f.map((r, k) => `<button type="button" class="pl-cand${k ? '' : ' top'}" data-plcand="${i}:${k}"><span class="pin-l">${LETTERS[k]}</span><span><b>${k ? '' : '<span class="badge">いちばん近い</span> '}${esc(r.name)}</b><small>${esc([r.kind, r.addr].filter(Boolean).join('・'))}${distTxt(r)}</small></span><span class="pl-pick">これ</span></button>`).join('')
+      : '<small>見つかりませんでした</small>'}
+      <div class="pl-acts"><button type="button" data-plmore="${i}">名前を変えて探す</button><button type="button" data-plnone="${i}">場所はない</button></div></div>`;
+  }
+  return `<div class="pl-row${plSel === i ? ' on' : ''}" data-plrow="${i}"><div class="pl-time">${it.time ? hm(it.time) : '—'}</div>
+    <div class="pl-main"><div class="pl-name">${it.no ? `<span class="pl-no">${it.no}</span>` : ''}${badge}${esc(it.name)}</div>${where}${ask}</div></div>`;
+}
+function plFoundHtml() {
+  if (!plFound.length) return '';
+  const act = plAssign != null ? 'これにする' : '＋足す';
+  return `<div class="pl-h">見つかった場所(押すと${plAssign != null ? '行き先に決まります' : '足します'})</div><div class="pl-cands">` +
+    plFound.map((r, k) => `<button type="button" class="pl-cand${k ? '' : ' top'}" data-pladd="${k}"><span class="pin-l blue">${k + 1}</span><span><b>${k ? '' : '<span class="badge">いちばん近い</span> '}${esc(r.name)}</b><small>${esc([r.kind, r.addr].filter(Boolean).join('・'))}${distTxt(r)}</small></span><span class="pl-pick">${act}</span></button>`).join('') + '</div>';
+}
+function renderPlanner(fit = true) {
+  const note = $('#plAssignNote');
+  note.hidden = plAssign == null;
+  if (plAssign != null) note.textContent = `「${items[plAssign].name}」の行き先を探しています(見つかった場所を押すと決まります)`;
+  $('#plFound').innerHTML = plFoundHtml();
+  $('#plRows').innerHTML = items.length ? items.map(plRowHtml).join('') : '<p class="hint">この日の予定はまだありません。上の欄で行きたい場所を探して足してください。</p>';
+  drawPlannerMap(fit);
+  fillPlannerCands();
+}
+// 場所のない予定の候補を、上から順に探す(近い順にするため、今いる所が分かるまで少し待つ)
+async function fillPlannerCands() {
+  if (fillPlannerCands.busy) return;
+  fillPlannerCands.busy = true;
+  for (let t = 0; !me && t < 15; t++) await sleep(200);
+  for (const [i, it] of items.entries()) {
+    if (!needsPlace(it) || plCands[i] !== undefined) continue;
+    try { plCands[i] = (await findPlaces(it.name)).slice(0, 4); } catch (e) { plCands[i] = []; }
+    const row = document.querySelector(`[data-plrow="${i}"]`);
+    if (row) row.outerHTML = plRowHtml(it, i);
+    drawPlannerMap(plSel === i || plSel == null);
+  }
+  fillPlannerCands.busy = false;
+}
+function drawPlannerMap(fit) {
+  plLayer.clearLayers();
+  const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#e8590c';
+  const pts = [], selPts = [];
+  const pin = (ll, cls, txt, size) => L.marker(ll, { icon: L.divIcon({ className: '', html: `<div class="pin ${cls}">${txt}</div>`, iconSize: [size, size], iconAnchor: [size / 2, size / 2] }) }).addTo(plLayer);
+  let prev = null;
+  items.forEach((it, i) => {
+    if (it.lat == null) return;
+    const ll = [it.lat, it.lng];
+    pin(ll, plSel === i ? 'on' : '', it.no || '', 28).on('click', () => selectPlRow(i));
+    if (prev) L.polyline([prev, ll], { color: accent, weight: 3, opacity: .6, interactive: false }).addTo(plLayer);
+    prev = ll; pts.push(ll); if (plSel === i) selPts.push(ll);
+  });
+  Object.entries(plCands).forEach(([i, f]) => {
+    if (!items[i] || !needsPlace(items[i])) return;
+    (f || []).forEach((r, k) => {
+      const ll = [r.lat, r.lng];
+      pin(ll, 'cand' + (plSel === +i ? ' on' : ''), LETTERS[k], 26).on('click', () => selectPlRow(+i));
+      pts.push(ll); if (plSel === +i) selPts.push(ll);
+    });
+  });
+  plFound.forEach((r, k) => {
+    const ll = [r.lat, r.lng];
+    pin(ll, 'found', k + 1, 26).on('click', () => document.querySelector(`[data-pladd="${k}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }));
+    selPts.push(ll); pts.push(ll);
+  });
+  if (me) L.circleMarker(me, { radius: 7, color: '#fff', weight: 3, fillColor: '#1a73e8', fillOpacity: 1, interactive: false }).addTo(plLayer);
+  if (!fit) return;
+  const use = selPts.length ? selPts : pts;
+  if (use.length > 1) plMap.fitBounds(use, { padding: [30, 30], maxZoom: 16 });
+  else if (use.length) plMap.setView(use[0], 15);
+  else if (me) plMap.setView(me, 14);
+  else plMap.setView([35.68, 139.76], 11);
+}
+function selectPlRow(i) {
+  plSel = i;
+  document.querySelectorAll('.pl-row.on').forEach(r => r.classList.remove('on'));
+  const row = document.querySelector(`[data-plrow="${i}"]`);
+  row?.classList.add('on');
+  row?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  drawPlannerMap(true);
+}
+// 足した・決めたあとに、その日の予定を読み直す(カレンダーの予定の並びが変わるので、候補も探し直す)
+async function reloadDayItems() {
+  let list = dailyItems(data.date);
+  if (gcalToken()) { try { list = [...list, ...await gcalDay(data.date)]; } catch (e) {} }
+  items = sortDay(list); data.items = items; allDays = [{ id: data.date, data }];
+  plCands = {}; plSel = null;
+}
+function setupPlanner() {
+  $('#plClose').addEventListener('click', closePlanner);
+  $('#plAdd').addEventListener('submit', async e => {
+    e.preventDefault();
+    const q = $('#plQ').value.trim();
+    if (!q) return;
+    $('#plQ').blur();
+    $('#plFound').innerHTML = '<div class="pl-h">探しています…</div>';
+    try { plFound = (await findPlaces(q)).slice(0, 8); } catch (err) { plFound = []; }
+    if (!plFound.length) { $('#plFound').innerHTML = '<div class="pl-h">見つかりませんでした。名前や住所を変えて探してください</div>'; return; }
+    $('#plFound').innerHTML = plFoundHtml();
+    drawPlannerMap(true);
+  });
+  $('#planner').addEventListener('click', async e => {
+    const b = e.target.closest('[data-plcand],[data-plnone],[data-plmore],[data-pladd]');
+    if (!b) {
+      const row = e.target.closest('[data-plrow]');
+      if (row) selectPlRow(+row.dataset.plrow);
+      return;
+    }
+    if (b.disabled) return;
+    b.disabled = true;
+    if (b.dataset.plcand) {
+      const [i, k] = b.dataset.plcand.split(':').map(Number);
+      if (await setEventPlace(i, plCands[i][k], true)) { plDirty = true; sortDay(items); plCands = {}; plSel = null; renderPlanner(); }
+    } else if (b.dataset.plnone) {
+      const i = +b.dataset.plnone;
+      if (confirm(`「${items[i].name}」は場所のない予定にしますか?(次から聞きません)`) && await setEventNoPlace(i, true)) { plDirty = true; renderPlanner(false); }
+    } else if (b.dataset.plmore) {
+      plAssign = +b.dataset.plmore;
+      $('#plQ').value = items[plAssign].name;
+      plFound = [];
+      renderPlanner(false);
+      $('.pl-list').scrollTop = 0;
+      $('#plQ').focus();
+    } else if (b.dataset.pladd) {
+      const r = plFound[+b.dataset.pladd];
+      if (plAssign != null) {
+        if (await setEventPlace(plAssign, r, true)) { plDirty = true; plAssign = null; plFound = []; $('#plQ').value = ''; sortDay(items); plCands = {}; renderPlanner(); }
+      } else {
+        const cal = $('#plCal').value, time = $('#plTime').value;
+        try {
+          if (cal && gcalToken()) {
+            store('localStorage', CALPICK_KEY, cal);
+            await gcalAdd(data.date, r, cal, { time, memo: '' });
+          } else {
+            const all = loadDaily();
+            (all[data.date] = all[data.date] || []).push({ id: Date.now(), name: r.name, addr: r.addr || '', time, memo: '', lat: r.lat, lng: r.lng, country: r.country || 'jp', ...(r.kr ? { kr: r.kr } : {}) });
+            saveDaily(all);
+          }
+          toast(`「${r.name}」を足しました`);
+          plDirty = true; plFound = []; $('#plQ').value = ''; $('#plTime').value = '';
+          await reloadDayItems();
+          renderPlanner();
+        } catch (err) { toast(err.auth ? 'カレンダーとのつながりが切れました。もう一度つないでください' : '足せませんでした'); }
+      }
+    }
+    b.disabled = false;
+  });
+}
+
 // 予定をカレンダーに足す(時間がなければ終日)。場所の位置も予定に覚えておく(どの端末でも探し直さない)
-async function gcalAdd(date, entry, calId) {
-  const time = $('#dTime').value, memo = $('#dMemo').value.trim();
+async function gcalAdd(date, entry, calId, opt = {}) {
+  const time = opt.time ?? $('#dTime').value, memo = (opt.memo ?? $('#dMemo').value).trim();
   const ev = { summary: entry.name, description: (memo ? memo + '\n' : '') + '(トラベラーで足した予定)' };
   if (entry.lat != null) {
     ev.location = entry.addr ? `${entry.name} ${entry.addr}` : entry.name;
@@ -1551,8 +1809,16 @@ function gcalBarHtml(state) {
   return gcalWas() ? '📅 カレンダーをもう一度読む <small>(1時間ごとに必要・タップ)</small>' : '📅 Google カレンダーとつなぐ <small>(個人・ファミリーの予定が出ます)</small>';
 }
 
+// 時間のある予定を時刻の順に、時間なしはあと。印の番号は場所のある予定だけに振り直す
+function sortDay(list) {
+  list.sort((a, b) => (a.time ? 0 : 1) - (b.time ? 0 : 1) || (a.time || '').localeCompare(b.time || ''));
+  let no = 0;
+  list.forEach(it => { delete it.no; if (it.lat != null) it.no = ++no; });
+  return list;
+}
 async function setupDaily() {
   DAILY = true;
+  document.body.classList.add('daily');
   const got = importFromHash();
   if (got?.n) { store('sessionStorage', 'daily-imported', String(got.n)); if (got.date && got.date !== (Q.get('date') || todayStr())) { location.replace(dailyHref(got.date)); return false; } }
   else if (got) toast('もう入っている予定でした');
@@ -1574,6 +1840,7 @@ async function setupDaily() {
   }).join('');
   items = dailyItems(date);
   bindAskPlaces();
+  setupPlanner();
   // Google カレンダーの予定を混ぜる(つないでいる時だけ)
   const bar = $('#gcalBar');
   if (GOOGLE_CLIENT_ID) {
@@ -1586,11 +1853,7 @@ async function setupDaily() {
     }
     if (gcalToken()) {
       try {
-        const ev = await gcalDay(date);
-        items = [...items, ...ev];
-        items.sort((a, b) => (a.time ? 0 : 1) - (b.time ? 0 : 1) || (a.time || '').localeCompare(b.time || ''));
-        let no = 0;
-        items.forEach(it => { delete it.no; if (it.lat != null) it.no = ++no; });
+        items = sortDay([...items, ...await gcalDay(date)]);
         on = true;
       } catch (e) { if (!e.auth) toast('カレンダーを読めませんでした'); }
     }
@@ -1782,7 +2045,7 @@ async function main() {
 // ---- 新しい版が出ていたら自動で読み直す(2026-11-19) ----
 // GitHub Pages のページは iPhone の Safari に最大10分ほど覚えられ、直した版がすぐ出なかった。
 // 開いた時に今の版の印(BUILD)を読みに行き、違えば1回だけ読み直す。直したら BUILD を変える(README の決まり)
-const BUILD = '2026-11-19-places2';
+const BUILD = '2026-11-19-planner1';
 async function checkNewBuild() {
   try {
     const t = await (await fetch(location.pathname + '?build=' + Date.now(), { cache: 'no-store' })).text();
