@@ -326,7 +326,8 @@
   .ask-list { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 6px; }
   .ask-list small { color: var(--sub); font-size: 12px; }
   .ask-list a.cand { display: block; text-decoration: none; color: var(--text); background: var(--chip); border-radius: 10px; padding: 7px 10px; border: 1.5px solid var(--line); }
-  .ask-list a.cand b { display: block; font-size: 14px; }
+  .ask-list a.cand b { display: inline; font-size: 14px; }
+  .ask-list a.cand.top { border-color: var(--accent); }
   .ask-list a.cand small { display: block; }
   /* 検索シートを「行き先を決める」形で開いた時は、時間・メモ・カレンダー・場所なしで足すを隠す */
   #findSheet.assign label[for="dTime"], #findSheet.assign #dTime, #findSheet.assign label[for="dMemo"], #findSheet.assign #dMemo,
@@ -1177,10 +1178,38 @@ async function addDaily(entry) {
   location.href = box.href;
 }
 // 場所さがしは OpenStreetMap の Nominatim(キー不要)。今いる所の近くを先に出す
+// お店さがしは Google の場所の検索(Places API の Text Search)。Google マップと同じ中身なので、
+// 個人のお店・言い方のゆれ(カタカナ/英語・名前に余分な言葉)にも強い(2026-11-19。OpenStreetMap では個人のお店が出なかった)。
+// 今いる所(なければ地図の真ん中)のまわりを優先して探し、近い順に並べる。キーがない・使えない時は OpenStreetMap で探す。
+// PLACES_KEY はトラベラーのページからしか使えないように Google 側で絞ったキー(1日の回数にも上限)
+const PLACES_KEY = 'AIzaSyAaQ8vlRiBZGH8ogLl-L8fXjpqstf-VDfg';
+// この端末で1日に Google で探す回数の上限(使いすぎの歯止め。超えたら OpenStreetMap で探す)
+const PLACES_DAILY_MAX = 60;
+async function findPlacesGoogle(q, c) {
+  const body = { textQuery: q, languageCode: 'ja', maxResultCount: 8 };
+  if (c) body.locationBias = { circle: { center: { latitude: c[0], longitude: c[1] }, radius: 8000 } };
+  const res = await fetch('https://places.googleapis.com/v1/places:searchText', { method: 'POST', body: JSON.stringify(body),
+    headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': PLACES_KEY,
+      'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.location,places.primaryTypeDisplayName,places.addressComponents' } });
+  if (!res.ok) throw new Error('places ' + res.status);
+  return ((await res.json()).places || []).map(r => {
+    const cc = (r.addressComponents || []).find(a => (a.types || []).includes('country'))?.shortText?.toLowerCase() || 'jp';
+    return { name: r.displayName?.text || q, addr: String(r.formattedAddress || '').replace(/^日本、\s*(〒\d{3}-\d{4}\s*)?/, ''),
+             kind: r.primaryTypeDisplayName?.text || '', lat: r.location?.latitude, lng: r.location?.longitude, country: cc,
+             ...(cc === 'kr' ? { kr: r.displayName?.text } : {}) };
+  }).filter(r => r.lat != null);
+}
 async function findPlaces(q) {
   // 「35.68, 139.76」のように座標を貼った時はそのまま使う
   const ll = q.match(/(-?\d{1,2}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)/);
   if (ll) return [{ name: q.replace(ll[0], '').trim() || '指定した場所', addr: `${ll[1]}, ${ll[2]}`, lat: +ll[1], lng: +ll[2], country: 'jp' }];
+  const c0 = me || (map && map.getCenter && [map.getCenter().lat, map.getCenter().lng]);
+  const near = list => c0 ? list.sort((a, b) => meters({ lat: c0[0], lng: c0[1] }, a) - meters({ lat: c0[0], lng: c0[1] }, b)) : list;
+  const usedKey = 'places-used:' + todayStr(), used = +(store('localStorage', usedKey) || 0);
+  if (PLACES_KEY && used < PLACES_DAILY_MAX) {
+    store('localStorage', usedKey, String(used + 1));
+    try { return near(await findPlacesGoogle(q, c0)); } catch (e) { /* 下の OpenStreetMap で探す */ }
+  }
   const p = new URLSearchParams({ q, format: 'jsonv2', limit: '8', 'accept-language': 'ja', addressdetails: '1', namedetails: '1' });
   const c = me || (map && map.getCenter && [map.getCenter().lat, map.getCenter().lng]);
   if (c) p.set('viewbox', [c[1] - .3, c[0] + .3, c[1] + .3, c[0] - .3].join(','));
@@ -1441,13 +1470,15 @@ function askPlaceHtml(it, i) {
 }
 // カードが出たら、行き先のない予定の候補を順に探す(地図の検索は1秒に1回までの決まりなので、1件ずつ)
 async function fillAskPlaces() {
+  if (!document.querySelector('[data-ask]')) return;
+  for (let t = 0; !me && t < 20; t++) await new Promise(r => setTimeout(r, 200));
   for (const box of document.querySelectorAll('[data-ask]')) {
     const i = +box.dataset.ask, it = items[i], list = box.querySelector('.ask-list');
     let found = [];
     try { found = (await findPlaces(it.name)).slice(0, 4); } catch (e) {}
     box._found = found;
     list.innerHTML = found.length
-      ? found.map((r, k) => `<a href="#" class="cand" data-cand="${i}:${k}"><b>${esc(r.name)}</b><small>${esc(r.addr)}${me ? `・約${(meters({ lat: me[0], lng: me[1] }, r) / 1000).toFixed(1)}km` : ''}</small></a>`).join('')
+      ? found.map((r, k) => `<a href="#" class="cand${k ? '' : ' top'}" data-cand="${i}:${k}">${k ? '' : '<span class="badge">いちばん近い</span> '}<b>${esc(r.name)}</b><small>${esc([r.kind, r.addr].filter(Boolean).join('・'))}${me ? `・約${(meters({ lat: me[0], lng: me[1] }, r) / 1000).toFixed(1)}km` : ''}</small></a>`).join('')
       : '<small>地図の上では見つかりませんでした。「ほかを探す」で名前を変えて探せます</small>';
     await new Promise(r => setTimeout(r, 1100));
   }
@@ -1751,7 +1782,7 @@ async function main() {
 // ---- 新しい版が出ていたら自動で読み直す(2026-11-19) ----
 // GitHub Pages のページは iPhone の Safari に最大10分ほど覚えられ、直した版がすぐ出なかった。
 // 開いた時に今の版の印(BUILD)を読みに行き、違えば1回だけ読み直す。直したら BUILD を変える(README の決まり)
-const BUILD = '2026-11-19-ask2';
+const BUILD = '2026-11-19-places1';
 async function checkNewBuild() {
   try {
     const t = await (await fetch(location.pathname + '?build=' + Date.now(), { cache: 'no-store' })).text();
