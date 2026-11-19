@@ -1251,7 +1251,9 @@ const PLACES_DAILY_MAX = 60;
 async function findPlacesGoogle(q, c) {
   const body = { textQuery: q, languageCode: 'ja', maxResultCount: 8 };
   if (c) body.locationBias = { circle: { center: { latitude: c[0], longitude: c[1] }, radius: 8000 } };
-  const res = await fetch('https://places.googleapis.com/v1/places:searchText', { method: 'POST', body: JSON.stringify(body),
+  // 鍵は「trip-map/ のページからだけ」に絞ってある。Safari などは別のサイトへはふつう「takuma181ww-art.github.io/」までしか
+  // 伝えず、Google に断られて(403)お店が出なかった(2026-11-19)。ページの住所を最後まで伝える
+  const res = await fetch('https://places.googleapis.com/v1/places:searchText', { method: 'POST', body: JSON.stringify(body), referrerPolicy: 'no-referrer-when-downgrade',
     headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': PLACES_KEY,
       'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.location,places.primaryTypeDisplayName,places.addressComponents' } });
   if (!res.ok) throw new Error('places ' + res.status);
@@ -2045,7 +2047,7 @@ async function main() {
 // ---- 新しい版が出ていたら自動で読み直す(2026-11-19) ----
 // GitHub Pages のページは iPhone の Safari に最大10分ほど覚えられ、直した版がすぐ出なかった。
 // 開いた時に今の版の印(BUILD)を読みに行き、違えば1回だけ読み直す。直したら BUILD を変える(README の決まり)
-const BUILD = '2026-11-19-planner1';
+const BUILD = '2026-11-19-planner2';
 async function checkNewBuild() {
   try {
     const t = await (await fetch(location.pathname + '?build=' + Date.now(), { cache: 'no-store' })).text();
