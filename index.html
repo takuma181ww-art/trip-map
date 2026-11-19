@@ -368,6 +368,12 @@
   .pl-h { font-size: 13px; font-weight: 800; color: var(--sub); margin: 14px 0 6px; }
   .pl-row { display: flex; gap: 10px; padding: 10px; border-radius: 12px; background: var(--card); margin-bottom: 8px; border: 1.5px solid transparent; box-shadow: var(--shadow); }
   .pl-row.on { border-color: var(--accent); }
+  .pl-drag { flex: 0 0 auto; align-self: center; width: 22px; text-align: center; font-size: 20px; color: var(--sub); cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
+  .pl-row.dragging { opacity: .85; box-shadow: 0 10px 30px rgba(0,0,0,.25); position: relative; z-index: 5; }
+  .pl-row.drop-before { box-shadow: 0 -3px 0 var(--accent), var(--shadow); }
+  #plRows.drop-end { box-shadow: 0 3px 0 var(--accent); }
+  .pl-time small { display: block; font-size: 11px; font-weight: 700; color: var(--accent); line-height: 1.3; }
+  .after-l { font-size: 14px; font-weight: 800; color: var(--accent); }
   .pl-time { flex: 0 0 44px; font-weight: 800; font-variant-numeric: tabular-nums; }
   .pl-main { flex: 1; min-width: 0; }
   .pl-name { font-weight: 700; line-height: 1.35; }
@@ -387,6 +393,12 @@
   .pl-acts button { flex: 1; border: 1px solid var(--line); background: var(--card); color: var(--text); border-radius: 999px; padding: 6px; font-family: inherit; font-size: 12px; font-weight: 700; }
   .pin.cand { background: #868e96; border-color: #fff; color: #fff; }
   .pin.found { background: #1a73e8; border-color: #fff; color: #fff; }
+  .pin.drop { background: transparent; border: 0; box-shadow: none; font-size: 26px; }
+  .pl-tip { margin-top: 8px; font-size: 12px; color: var(--sub); line-height: 1.5; }
+  .drop-pop { display: flex; flex-direction: column; gap: 6px; min-width: 200px; font-family: -apple-system, "Hiragino Sans", sans-serif; }
+  .drop-pop small { color: #666; font-size: 11px; line-height: 1.4; }
+  .drop-pop button { border: 0; border-radius: 8px; padding: 8px; background: #e8590c; color: #fff; font-weight: 700; font-size: 13px; font-family: inherit; }
+  .drop-pop button[data-drop="fix"] { background: #f0eee9; color: #1d1d1f; }
   .found li { cursor: pointer; flex-direction: column; gap: 2px; }
   .found li b { font-size: 15px; }
   .found li small { color: var(--sub); font-size: 12px; line-height: 1.4; }
@@ -456,8 +468,10 @@
     <div class="pl-list">
       <form id="plAdd" autocomplete="off"><input id="plQ" type="search" enterkeyhint="search" placeholder="行きたい場所を探して足す" aria-label="行きたい場所を探す"><button type="submit">探す</button></form>
       <div class="pl-opts"><label>時間<input id="plTime" type="time"></label><label>入れる所<select id="plCal"></select></label></div>
+      <div class="pl-tip">時間を空けて足すと、いちばん下の予定のあとに入ります。行の左の ≡ をドラッグすると順番を変えられます</div>
       <div id="plAssignNote" hidden></div>
       <div id="plFound"></div>
+      <div class="pl-tip">地図を長押しすると、その地点にピンを立てて足せます(駐車場など)。予定を選んでから長押しすると、その予定の場所を直せます</div>
       <div class="pl-h">この日の予定</div>
       <div id="plRows"></div>
     </div>
@@ -574,8 +588,10 @@ function openNaver(it, e) {
   location.href = app;
 }
 // 座標があやしい所(住所からのおおよその位置)は、googleQuery に住所を書いておくと住所で探す
+// 地図を長押しして決めた場所(exact)は、住所ではなくその地点そのものへ(駐車場など、点の位置で行き先が変わるため)
+const placeQuery = it => it.exact || !it.googleQuery ? it.lat + ',' + it.lng : encodeURIComponent(it.googleQuery);
 function googleUrl(it) {
-  return 'https://www.google.com/maps/search/?api=1&query=' + (it.googleQuery ? encodeURIComponent(it.googleQuery) : it.lat + ',' + it.lng);
+  return 'https://www.google.com/maps/search/?api=1&query=' + placeQuery(it);
 }
 
 function memoHtml(memo) {
@@ -611,7 +627,7 @@ function cardHtml(it, i) {
   return `<article class="card" role="listitem" data-i="${i}">
     <div class="card-head">
       <div class="num ${hasPlace ? '' : 'plain'}">${it.no ?? ''}</div>
-      <div class="time">${it.time ? hm(it.time) : DAILY || it.local ? '<span class="was">時間なし</span>' : ''}${wasHtml(i)}</div>
+      <div class="time">${timeLabel(it) ? `<span class="after-l">${esc(timeLabel(it))}</span>` : it.time ? hm(it.time) : DAILY || it.local ? '<span class="was">時間なし</span>' : ''}${wasHtml(i)}</div>
       ${it.gcal ? `<a class="shift-btn" href="${esc(it.link)}" target="_blank" rel="noopener" style="text-decoration:none">カレンダー</a>`
         : DAILY || it.local ? `<button class="shift-btn" type="button" data-del="${i}">消す</button>` : shiftBtn(i, 'ここから再開')}
     </div>
@@ -1233,14 +1249,17 @@ async function addDaily(entry) {
   if (cal) {
     store('localStorage', CALPICK_KEY, cal);
     try {
-      const ev = await gcalAdd(data.date, entry, cal);
+      const opt = {};
+      if (!$('#dTime').value) { const a = afterLast(); opt.time = a.time; opt.after = a.after; }
+      const ev = await gcalAdd(data.date, entry, cal, opt);
       store('sessionStorage', 'daily-focus', 'g:' + ev.id);
       location.href = dailyHref(data.date);
     } catch (e) { toast(e.auth ? 'カレンダーとのつながりが切れました。上の帯からもう一度つないでください' : 'カレンダーに足せませんでした'); }
     return;
   }
   const box = localBox(), all = box.load();
-  const it = { id: Date.now(), name: entry.name, time: $('#dTime').value || '', memo: $('#dMemo').value.trim(),
+  const a = DAILY && !$('#dTime').value ? afterLast() : { after: '', time: $('#dTime').value || '' };
+  const it = { id: Date.now(), name: entry.name, time: a.time, after: a.after, memo: $('#dMemo').value.trim(),
                lat: entry.lat ?? null, lng: entry.lng ?? null, country: entry.country || 'jp' };
   if (entry.kr) it.kr = entry.kr;
   (all[box.key] = all[box.key] || []).push(it);
@@ -1390,6 +1409,14 @@ function importFromHash() {
   saveDaily(all);
   return { n, date: first };
 }
+// ---- 「◯◯のあと」の予定(2026-11-19 Taku「時間を決めずに今の予定のあとに入れ、ドラッグで動かす」) ----
+// 時間を入れずに足すと、いちばん下の予定のあとに入る。カレンダーには前の予定の終わり(なければ始まり+60分)で仮に入れ、
+// extendedProperties.private.after に前の予定の id を書く。トラベラーでは時刻ではなく「◯◯のあと」と出す
+const predOf = it => it?.after ? items.find(x => String(x.id) === it.after) : null;
+const endOf = it => it ? (it.end || (it.time ? toHM(toMin(it.time) + 60) : '')) : '';
+const timeLabel = it => { const p = predOf(it); return p ? `${p.name}のあと` : ''; };
+const carMins = d => Math.round(5 + d * 1.35 / 500);
+
 // ---- 何時に出ればいい?(日常で、場所と時刻のある予定) ----
 // 着きたい時刻(arrive、なければ time)から、今いる所からの移動の目安と余裕10分を引く。
 // 直線距離からの目安なので、ぴったりの時間は「Google マップの経路」で確かめる
@@ -1399,15 +1426,27 @@ function leaveMins(d) {
   return { how: '電車で', m: Math.round(10 + d * 1.25 / 900) };
 }
 function leaveHtml(it, i) {
-  if (!DAILY || !isPlace(it) || !(it.arrive || it.time)) return '';
-  const dir = 'https://www.google.com/maps/dir/?api=1&travelmode=transit&destination=' +
-              (it.googleQuery ? encodeURIComponent(it.googleQuery) : it.lat + ',' + it.lng);
-  return `<div class="go" data-leave="${i}"><div class="go-label">出る時刻:現在地が分かると出ます(📍)</div>
-    <div class="go-btns"><a href="${dir}" target="_blank" rel="noopener">🚇 Google マップの経路で確かめる</a></div></div>`;
+  if (!DAILY || !isPlace(it) || !(it.arrive || it.time || it.after)) return '';
+  const dir = mode => `https://www.google.com/maps/dir/?api=1&travelmode=${mode}&destination=${placeQuery(it)}`;
+  return `<div class="go" data-leave="${i}"${predOf(it) ? ' data-after="1"' : ''}><div class="go-label">出る時刻:現在地が分かると出ます(📍)</div>
+    <div class="go-btns"><a href="${dir('transit')}" target="_blank" rel="noopener">🚇 電車の経路</a><a href="${dir('driving')}" target="_blank" rel="noopener">🚗 車の経路</a></div></div>`;
 }
 function updateLeaveTimes() {
   document.querySelectorAll('[data-leave]').forEach(box => {
     const it = items[+box.dataset.leave];
+    const prev = predOf(it);
+    if (prev) {
+      // 前の予定が終わったら(行けた・終わる時刻を過ぎた)、今いる所から。まだなら前の予定の場所から
+      const pe = endOf(prev), done = visitOf(prev)?.s === 'done' || (data.date === todayStr() && pe && nowMin() >= toMin(pe));
+      const from = done ? me : (prev.lat != null ? [prev.lat, prev.lng] : me);
+      if (!from) return;
+      const d = map.distance(from, [it.lat, it.lng]), t = leaveMins(d);
+      const eta = `🚗約${Math.max(1, carMins(d))}分・🚇${t.how === '歩いて' ? '歩いて' : ''}約${Math.max(1, t.m)}分`;
+      box.querySelector('.go-label').innerHTML = done
+        ? `<b style="color:var(--accent);font-size:15px">今から行くと ${eta}</b>(目安)`
+        : `<b style="color:var(--accent);font-size:15px">${esc(prev.name)}が終わったら</b>(${pe ? hm(pe) + 'ごろ' : ''})出発・${eta}(目安)`;
+      return;
+    }
     if (!me) return;
     const goal = it.arrive || it.time, d = map.distance(me, [it.lat, it.lng]), t = leaveMins(d);
     const leave = toMin(goal) - t.m - LEAVE_BUFFER, late = data.date === todayStr() && leave < nowMin();
@@ -1523,13 +1562,15 @@ async function gcalDay(date) {
                  lat: null, lng: null, country: 'jp' };
     const pp = e.extendedProperties?.private || {};
     if (pp.arrive) it.arrive = pp.arrive;
+    if (pp.after) it.after = pp.after;   // 「◯◯のあと」の予定(前の予定の id)
+    it.pp = { ...pp };                   // 書き戻す時に、ほかの印(位置など)を消さないため
     it.eventId = e.id; it.canWrite = c.canWrite; it.noPlace = pp.noPlace === '1';
     // 読むだけのカレンダーで選んだ行き先は、端末に覚えたものを使う
     const own = !e.location && loadPlaceFix()[e.id];
-    if (own) { if (own.lat == null) it.noPlace = true; else { it.lat = own.lat; it.lng = own.lng; it.googleQuery = own.q; } }
+    if (own) { if (own.lat == null) it.noPlace = true; else { it.lat = own.lat; it.lng = own.lng; it.googleQuery = own.q; it.exact = !!own.exact; } }
     if (e.location) {
       it.googleQuery = e.location;
-      if (pp.lat && pp.lng) { it.lat = +pp.lat; it.lng = +pp.lng; }
+      if (pp.lat && pp.lng) { it.lat = +pp.lat; it.lng = +pp.lng; it.exact = pp.exact === '1'; }
       else { const g = await geocode(e.location); if (g) { it.lat = g[0]; it.lng = g[1]; if (g[2]) it.note = '地図の印はおおよその位置(Google マップは住所で開きます)'; } }
     }
     out.push(it);
@@ -1567,17 +1608,17 @@ async function fillAskPlaces() {
 async function setEventPlace(i, place, stay = false) {
   const it = items[i];
   if (!it.canWrite) {   // 読むだけのカレンダーは書き戻せないので、この端末に覚える
-    const v = loadPlaceFix(); v[it.eventId] = { lat: place.lat, lng: place.lng, q: `${place.name} ${place.addr || ''}`.trim() };
+    const v = loadPlaceFix(); v[it.eventId] = { lat: place.lat, lng: place.lng, q: `${place.name} ${place.addr || ''}`.trim(), exact: !!place.exact };
     try { localStorage.setItem(PLACEFIX_KEY, JSON.stringify(v)); } catch (e) {}
   } else {
     try {
       await gapi(`calendars/${encodeURIComponent(it.calId)}/events/${encodeURIComponent(it.eventId)}`, { method: 'PATCH', body: JSON.stringify({
         location: `${place.name} ${place.addr || ''}`.trim(),
-        extendedProperties: { private: { lat: String(place.lat), lng: String(place.lng) } } }) });
+        extendedProperties: { private: { ...(it.pp || {}), lat: String(place.lat), lng: String(place.lng), exact: place.exact ? '1' : '' } } }) });
     } catch (e) { toast(e.auth ? 'カレンダーとのつながりが切れました。もう一度つないでください' : 'カレンダーに書けませんでした'); return false; }
   }
   toast(`「${place.name}」を行き先にしました`);
-  if (stay) { it.lat = place.lat; it.lng = place.lng; it.googleQuery = `${place.name} ${place.addr || ''}`.trim(); return true; }
+  if (stay) { it.lat = place.lat; it.lng = place.lng; it.googleQuery = `${place.name} ${place.addr || ''}`.trim(); it.exact = !!place.exact; return true; }
   store('sessionStorage', 'daily-focus', it.id);
   location.href = dailyHref(data.date);
   return true;
@@ -1585,7 +1626,7 @@ async function setEventPlace(i, place, stay = false) {
 async function setEventNoPlace(i, stay = false) {
   const it = items[i];
   if (it.canWrite) {
-    try { await gapi(`calendars/${encodeURIComponent(it.calId)}/events/${encodeURIComponent(it.eventId)}`, { method: 'PATCH', body: JSON.stringify({ extendedProperties: { private: { noPlace: '1' } } }) }); }
+    try { await gapi(`calendars/${encodeURIComponent(it.calId)}/events/${encodeURIComponent(it.eventId)}`, { method: 'PATCH', body: JSON.stringify({ extendedProperties: { private: { ...(it.pp || {}), noPlace: '1' } } }) }); }
     catch (e) { toast('カレンダーに書けませんでした'); return false; }
   } else {
     const v = loadPlaceFix(); v[it.eventId] = { lat: null, lng: null, q: '' };
@@ -1637,6 +1678,7 @@ function openPlanner(focus = null) {
     plMap = L.map('plMap', { zoomControl: false });
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' }).addTo(plMap);
     plLayer = L.layerGroup().addTo(plMap);
+    plMap.on('contextmenu', e => dropPin(e.latlng));   // 長押し(パソコンは右クリック)
   }
   plSel = focus;
   setTimeout(() => { plMap.invalidateSize(); renderPlanner(); }, 60);
@@ -1656,7 +1698,7 @@ function plRowHtml(it, i) {
       : '<small>見つかりませんでした</small>'}
       <div class="pl-acts"><button type="button" data-plmore="${i}">名前を変えて探す</button><button type="button" data-plnone="${i}">場所はない</button></div></div>`;
   }
-  return `<div class="pl-row${plSel === i ? ' on' : ''}" data-plrow="${i}"><div class="pl-time">${it.time ? hm(it.time) : '—'}</div>
+  return `<div class="pl-row${plSel === i ? ' on' : ''}" data-plrow="${i}"><span class="pl-drag" data-drag="${i}" aria-label="ドラッグで並べかえ">≡</span><div class="pl-time">${timeLabel(it) ? `<small>${esc(timeLabel(it))}</small>` : it.time ? hm(it.time) : '—'}</div>
     <div class="pl-main"><div class="pl-name">${it.no ? `<span class="pl-no">${it.no}</span>` : ''}${badge}${esc(it.name)}</div>${where}${ask}</div></div>`;
 }
 function plFoundHtml() {
@@ -1722,6 +1764,45 @@ function drawPlannerMap(fit) {
   else if (me) plMap.setView(me, 14);
   else plMap.setView([35.68, 139.76], 11);
 }
+// ---- 地図を長押しして目的地を決める(2026-11-19 Taku「公園の真ん中ではなく駐車場を目的地に」) ----
+// 長押しした地点にピンを立て、「ここを足す」か「選んでいる予定の場所をここにする」。住所は OpenStreetMap で調べて添える
+let dropMarker = null;
+async function dropPin(ll) {
+  dropMarker?.remove();
+  dropMarker = L.marker(ll, { icon: L.divIcon({ className: '', html: '<div class="pin drop">📍</div>', iconSize: [30, 30], iconAnchor: [15, 28] }) }).addTo(plMap);
+  const sel = plAssign ?? plSel, it = sel != null ? items[sel] : null;
+  const fixable = it && (it.gcal || it.local || DAILY);
+  const pop = L.popup({ closeButton: true, autoPan: true, offset: [0, -20] }).setLatLng(ll).setContent(
+    `<div class="drop-pop"><b>この地点</b><small id="dropAddr">住所を調べています…</small>
+      <button type="button" data-drop="add">＋ ここを足す</button>
+      ${fixable ? `<button type="button" data-drop="fix">「${esc(it.name)}」の場所をここにする</button>` : '<small>予定を選んでから長押しすると、その予定の場所を直せます</small>'}</div>`).openOn(plMap);
+  pop.on('remove', () => { dropMarker?.remove(); dropMarker = null; });
+  let addr = '';
+  try {
+    const p = new URLSearchParams({ lat: ll.lat, lon: ll.lng, format: 'jsonv2', 'accept-language': 'ja', zoom: '18' });
+    const r = await (await fetch('https://nominatim.openstreetmap.org/reverse?' + p)).json();
+    addr = String(r.display_name || '').split(',').slice(0, 4).join(',').trim();
+  } catch (e) {}
+  const el = document.getElementById('dropAddr');
+  if (el) el.textContent = addr || `${ll.lat.toFixed(5)}, ${ll.lng.toFixed(5)}`;
+  pop.getElement()?.addEventListener('click', async ev => {
+    const b = ev.target.closest('[data-drop]');
+    if (!b) return;
+    const place = { lat: ll.lat, lng: ll.lng, addr, exact: true };
+    if (b.dataset.drop === 'fix') {
+      place.name = it.name;
+      plMap.closePopup();
+      if (await setEventPlace(sel, place, true)) { plDirty = true; plAssign = null; plFound = []; sortDay(items); plCands = {}; renderPlanner(false); }
+    } else {
+      const name = prompt('この地点の名前(例: 東高根森林公園 駐車場)', ($('#plQ').value.trim() ? $('#plQ').value.trim() + ' ' : '') + '駐車場');
+      if (!name) return;
+      place.name = name.trim();
+      plMap.closePopup();
+      plFound = [place];
+      await addFromPlanner(place);
+    }
+  });
+}
 function selectPlRow(i) {
   plSel = i;
   document.querySelectorAll('.pl-row.on').forEach(r => r.classList.remove('on'));
@@ -1737,7 +1818,98 @@ async function reloadDayItems() {
   items = sortDay(list); data.items = items; allDays = [{ id: data.date, data }];
   plCands = {}; plSel = null;
 }
+// 大きな画面から1件足す(探した結果・長押しのピン)。時間と入れる所は上の欄のもの
+// 時間を入れずに足す時は、いちばん下の予定のあと(仮の時刻は、その予定の終わり)
+function afterLast() {
+  const last = items[items.length - 1];
+  return last ? { after: String(last.id), time: endOf(last) } : { after: '', time: '' };
+}
+async function addFromPlanner(r) {
+  const cal = $('#plCal').value;
+  let time = $('#plTime').value, after = '';
+  if (!time) ({ after, time } = afterLast());
+  try {
+    if (cal && gcalToken()) {
+      store('localStorage', CALPICK_KEY, cal);
+      await gcalAdd(data.date, r, cal, { time, memo: '', after });
+    } else {
+      const all = loadDaily();
+      (all[data.date] = all[data.date] || []).push({ id: Date.now(), name: r.name, addr: r.addr || '', exact: !!r.exact, time, after, memo: '', lat: r.lat, lng: r.lng, country: r.country || 'jp', ...(r.kr ? { kr: r.kr } : {}) });
+      saveDaily(all);
+    }
+    toast(`「${r.name}」を足しました`);
+    plDirty = true; plFound = []; $('#plQ').value = ''; $('#plTime').value = '';
+    await reloadDayItems();
+    renderPlanner();
+  } catch (err) { toast(err.auth ? 'カレンダーとのつながりが切れました。もう一度つないでください' : '足せませんでした'); }
+}
+// ---- ドラッグで並べかえ(大きな画面) ----
+// 動かした予定は「すぐ上の予定のあと」になり、その下の「◯◯のあと」の予定も順につなぎ直す。仮の時刻も上から順にずらす
+function setupPlDrag() {
+  const box = $('#plRows');
+  box.addEventListener('pointerdown', e => {
+    const h = e.target.closest('[data-drag]');
+    if (!h) return;
+    e.preventDefault();
+    const row = h.closest('.pl-row'), from = +row.dataset.plrow, y0 = e.clientY;
+    row.classList.add('dragging');
+    h.setPointerCapture(e.pointerId);
+    let to = from;
+    const move = ev => {
+      row.style.transform = `translateY(${ev.clientY - y0}px)`;
+      const rows = [...box.querySelectorAll('.pl-row')].filter(r => r !== row);
+      to = rows.length;
+      for (let k = 0; k < rows.length; k++) { const r = rows[k].getBoundingClientRect(); if (ev.clientY < r.top + r.height / 2) { to = k; break; } }
+      rows.forEach((r, k) => r.classList.toggle('drop-before', k === to));
+      box.classList.toggle('drop-end', to === rows.length);
+    };
+    const up = () => {
+      h.removeEventListener('pointermove', move);
+      row.style.transform = ''; row.classList.remove('dragging'); box.classList.remove('drop-end');
+      box.querySelectorAll('.drop-before').forEach(r => r.classList.remove('drop-before'));
+      if (to !== from) moveItem(from, to);
+    };
+    h.addEventListener('pointermove', move);
+    h.addEventListener('pointerup', up, { once: true });
+    h.addEventListener('pointercancel', up, { once: true });
+  });
+}
+async function moveItem(from, to) {
+  const arr = items.slice(), [moved] = arr.splice(from, 1);
+  arr.splice(to, 0, moved);
+  if (moved.gcal && !moved.canWrite) { toast('読むだけのカレンダーの予定は動かせません'); return; }
+  const changed = [];
+  arr.forEach((x, k) => {
+    if (x !== moved && !x.after) return;   // 時刻の決まった予定は、そのまま
+    const prev = arr[k - 1], next = arr[k + 1];
+    const after = prev ? String(prev.id) : '';
+    const time = prev ? endOf(prev) : (next?.time ? toHM(toMin(next.time) - 60) : x.time);
+    if (x.after !== after || x.time !== time) {
+      x.after = after; x.time = time; x.t0 = time; if (time) x.end = toHM(toMin(time) + 60);
+      changed.push(x);
+    }
+  });
+  for (const x of changed) {
+    try {
+      if (x.gcal) {
+        if (!x.canWrite) continue;
+        x.pp = { ...(x.pp || {}), after: x.after };
+        const body = { extendedProperties: { private: x.pp } };
+        if (x.time) { body.start = { dateTime: `${data.date}T${x.time}:00+09:00`, timeZone: 'Asia/Tokyo' }; body.end = { dateTime: `${data.date}T${x.end}:00+09:00`, timeZone: 'Asia/Tokyo' }; }
+        await gapi(`calendars/${encodeURIComponent(x.calId)}/events/${encodeURIComponent(x.eventId)}`, { method: 'PATCH', body: JSON.stringify(body) });
+      } else {
+        const all = loadDaily(), e = (all[data.date] || []).find(o => String(o.id) === String(x.id));
+        if (e) { e.after = x.after; e.time = x.time; saveDaily(all); }
+      }
+    } catch (err) { toast('カレンダーに書けませんでした'); }
+  }
+  items.splice(0, items.length, ...arr);
+  sortDay(items);
+  plDirty = true; plCands = {}; plSel = null;
+  renderPlanner(false);
+}
 function setupPlanner() {
+  setupPlDrag();
   $('#plClose').addEventListener('click', closePlanner);
   $('#plAdd').addEventListener('submit', async e => {
     e.preventDefault();
@@ -1777,21 +1949,7 @@ function setupPlanner() {
       if (plAssign != null) {
         if (await setEventPlace(plAssign, r, true)) { plDirty = true; plAssign = null; plFound = []; $('#plQ').value = ''; sortDay(items); plCands = {}; renderPlanner(); }
       } else {
-        const cal = $('#plCal').value, time = $('#plTime').value;
-        try {
-          if (cal && gcalToken()) {
-            store('localStorage', CALPICK_KEY, cal);
-            await gcalAdd(data.date, r, cal, { time, memo: '' });
-          } else {
-            const all = loadDaily();
-            (all[data.date] = all[data.date] || []).push({ id: Date.now(), name: r.name, addr: r.addr || '', time, memo: '', lat: r.lat, lng: r.lng, country: r.country || 'jp', ...(r.kr ? { kr: r.kr } : {}) });
-            saveDaily(all);
-          }
-          toast(`「${r.name}」を足しました`);
-          plDirty = true; plFound = []; $('#plQ').value = ''; $('#plTime').value = '';
-          await reloadDayItems();
-          renderPlanner();
-        } catch (err) { toast(err.auth ? 'カレンダーとのつながりが切れました。もう一度つないでください' : '足せませんでした'); }
+        await addFromPlanner(r);
       }
     }
     b.disabled = false;
@@ -1804,8 +1962,9 @@ async function gcalAdd(date, entry, calId, opt = {}) {
   const ev = { summary: entry.name, description: (memo ? memo + '\n' : '') + '(トラベラーで足した予定)' };
   if (entry.lat != null) {
     ev.location = entry.addr ? `${entry.name} ${entry.addr}` : entry.name;
-    ev.extendedProperties = { private: { lat: String(entry.lat), lng: String(entry.lng) } };
+    ev.extendedProperties = { private: { lat: String(entry.lat), lng: String(entry.lng), ...(entry.exact ? { exact: '1' } : {}) } };
   }
+  if (opt.after) ev.extendedProperties = { private: { ...(ev.extendedProperties?.private || {}), after: opt.after } };
   if (time) {
     const end = toHM(toMin(time) + 60);
     ev.start = { dateTime: `${date}T${time}:00+09:00`, timeZone: 'Asia/Tokyo' };
@@ -1821,7 +1980,18 @@ function gcalBarHtml(state) {
 
 // 時間のある予定を時刻の順に、時間なしはあと。印の番号は場所のある予定だけに振り直す
 function sortDay(list) {
-  list.sort((a, b) => (a.time ? 0 : 1) - (b.time ? 0 : 1) || (a.time || '').localeCompare(b.time || ''));
+  const byTime = (a, b) => (a.time ? 0 : 1) - (b.time ? 0 : 1) || (a.time || '').localeCompare(b.time || '');
+  const keys = new Set(list.map(it => String(it.id)));
+  const isChild = it => it.after && it.after !== String(it.id) && keys.has(it.after);
+  const out = [], seen = new Set();
+  const walk = it => {
+    if (seen.has(it)) return;
+    seen.add(it); out.push(it);
+    list.filter(x => isChild(x) && x.after === String(it.id)).sort(byTime).forEach(walk);
+  };
+  list.filter(it => !isChild(it)).sort(byTime).forEach(walk);
+  list.filter(it => !seen.has(it)).forEach(it => out.push(it));   // 念のため(輪になった時など)
+  list.splice(0, list.length, ...out);
   let no = 0;
   list.forEach(it => { delete it.no; if (it.lat != null) it.no = ++no; });
   return list;
@@ -1848,7 +2018,7 @@ async function setupDaily() {
     const n = (all[d] || []).length;
     return `<a href="${dailyHref(d)}" class="${d === date ? 'on' : ''}"${d === date ? ' aria-current="page"' : ''}>${rel}${m}/${dd}(${weekdayOf(d)})${n ? ` ・${n}` : ''}</a>`;
   }).join('');
-  items = dailyItems(date);
+  items = sortDay(dailyItems(date));
   bindAskPlaces();
   setupPlanner();
   // Google カレンダーの予定を混ぜる(つないでいる時だけ)
@@ -2055,7 +2225,7 @@ async function main() {
 // ---- 新しい版が出ていたら自動で読み直す(2026-11-19) ----
 // GitHub Pages のページは iPhone の Safari に最大10分ほど覚えられ、直した版がすぐ出なかった。
 // 開いた時に今の版の印(BUILD)を読みに行き、違えば1回だけ読み直す。直したら BUILD を変える(README の決まり)
-const BUILD = '2026-11-19-fit2';
+const BUILD = '2026-11-19-after1';
 async function checkNewBuild() {
   try {
     const t = await (await fetch(location.pathname + '?build=' + Date.now(), { cache: 'no-store' })).text();
