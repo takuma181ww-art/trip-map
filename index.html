@@ -1055,6 +1055,22 @@ function nowIndex() {
   });
   return { idx, isDay };
 }
+// 「今ここ」は自分のいる場所で選ぶ(2026-11-21 Taku「時間どおりに動けていないと、時刻で選ぶと実際の行動とずれる」)。
+// 現在地から HERE_NEAR_M 以内に予定の場所があれば、いちばん近いもの(同じ場所が何度もあれば時刻が今に近い方)。なければ -1
+const HERE_NEAR_M = 400;
+function hereIndex() {
+  if (!me) return -1;
+  const local = new Date(Date.now() + 9 * 3600000), mins = local.getUTCHours() * 60 + local.getUTCMinutes();
+  let best = -1, bestD = Infinity, bestGap = Infinity;
+  items.forEach((it, i) => {
+    if (!isPlace(it)) return;
+    const d = map.distance(me, [it.lat, it.lng]);
+    if (d > HERE_NEAR_M) return;
+    const gap = it.time ? Math.abs(toMin(it.time) - mins) : 24 * 60;
+    if (d < bestD - 50 || (Math.abs(d - bestD) <= 50 && gap < bestGap)) { best = i; bestD = d; bestGap = gap; }
+  });
+  return best;
+}
 
 // ---- 交通費の見積もり(便利メニュー) ----
 // 入っている予定を、となりの場所どうし電車・バスで動いた時の料金のめやす。決まりは data/fare_rules.json。
@@ -2217,8 +2233,13 @@ async function main() {
       return;
     }
     const n = nowIndex();
+    if (!n.isDay) { setActive(n.idx, { scroll: true }); toast('旅行の日ではないので、時刻だけで合わせました'); return; }
+    // 当日は、まず自分のいる場所で選ぶ。場所が分からない・近くに予定がない時だけ時刻で選ぶ
+    const h = hereIndex();
+    if (h >= 0) { setActive(h, { scroll: true }); toast(`現在地のそばの「${items[h].name}」を表示しました`); return; }
     setActive(n.idx, { scroll: true });
-    toast(n.isDay ? 'いまの予定を表示しました' : '旅行の日ではないので、時刻だけで合わせました');
+    if (!me) { startWatch(); toast('現在地がまだ分からないので、時刻で合わせました'); }
+    else toast('近くに予定の場所がないので、時刻で合わせました(移動中など)');
   });
 
   // 旅行の当日に開いたら、はじめから今の予定を出す
@@ -2238,7 +2259,7 @@ async function main() {
 // ---- 新しい版が出ていたら自動で読み直す(2026-11-19) ----
 // GitHub Pages のページは iPhone の Safari に最大10分ほど覚えられ、直した版がすぐ出なかった。
 // 開いた時に今の版の印(BUILD)を読みに行き、違えば1回だけ読み直す。直したら BUILD を変える(README の決まり)
-const BUILD = '2026-11-21-leg2';
+const BUILD = '2026-11-21-here1';
 async function checkNewBuild() {
   try {
     const t = await (await fetch(location.pathname + '?build=' + Date.now(), { cache: 'no-store' })).text();
