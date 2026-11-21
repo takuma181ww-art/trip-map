@@ -776,12 +776,30 @@ function startWatch() {
       // 日常で場所がまだない日は、自分のまわりを出す
       if (DAILY && !places().length) map.setView(me, 15);
     } else { meMarker.setLatLng(me); meCircle.setLatLng(me).setRadius(acc); }
+    if (fitPending) { const f = fitPending; fitPending = null; showMeAndCard(f.i, f.toastPrefix); }
     autoVisit(pos);
     if (!updateGoTimes.t) updateGoTimes.t = setTimeout(() => { updateGoTimes.t = 0; updateGoTimes(); }, 3000);
   }, err => {
     watching = false;
     if (err.code === 1) toast('位置情報が許可されていません(設定 → プライバシー → 位置情報 で Safari を許可)');
   }, { enableHighAccuracy: true, maximumAge: 10000, timeout: 20000 });
+}
+// 「今ここ」: 地図に自分(青い点)とカードの場所を両方入れ、いちばん近い予定を知らせる
+let fitPending = null;
+function showMeAndCard(i, prefix) {
+  const pts = [me];
+  const it = items[i];
+  if (it && isPlace(it)) pts.push([it.lat, it.lng]);
+  if (pts.length > 1 && map.distance(pts[0], pts[1]) > 30) map.fitBounds(L.latLngBounds(pts), { padding: [50, 50], maxZoom: 16, animate: true });
+  else map.flyTo(me, Math.max(map.getZoom(), 16), { duration: .8 });
+  let best = null, bd = Infinity;
+  items.forEach(x => { if (!isPlace(x)) return; const d = map.distance(me, [x.lat, x.lng]); if (d < bd) { bd = d; best = x; } });
+  let t = prefix || '';
+  if (best) {
+    const dm = bd < 1000 ? `約${Math.max(10, Math.round(bd / 10) * 10)}m` : `約${(bd / 1000).toFixed(1)}km`;
+    t += `${t ? '\n' : ''}いちばん近いのは${CIRCLED[best.no] || best.no} ${best.name}(${dm})`;
+  }
+  if (t) toast(t);
 }
 function addLocateButton() {
   const Ctl = L.Control.extend({ options: { position: 'topright' }, onAdd() {
@@ -2236,10 +2254,11 @@ async function main() {
     if (!n.isDay) { setActive(n.idx, { scroll: true }); toast('旅行の日ではないので、時刻だけで合わせました'); return; }
     // 当日は、まず自分のいる場所で選ぶ。場所が分からない・近くに予定がない時だけ時刻で選ぶ
     const h = hereIndex();
-    if (h >= 0) { setActive(h, { scroll: true }); toast(`現在地のそばの「${items[h].name}」を表示しました`); return; }
-    setActive(n.idx, { scroll: true });
-    if (!me) { startWatch(); toast('現在地がまだ分からないので、時刻で合わせました'); }
-    else toast('近くに予定の場所がないので、時刻で合わせました(移動中など)');
+    if (h >= 0) { setActive(h, { scroll: true, fly: false }); showMeAndCard(h, `現在地のそばの「${items[h].name}」を表示しました`); return; }
+    setActive(n.idx, { scroll: true, fly: !me });
+    startWatch();
+    if (!me) { fitPending = { i: n.idx, toastPrefix: '時刻で合わせました(現在地を探しています)' }; toast('現在地がまだ分からないので、時刻で合わせました'); }
+    else showMeAndCard(n.idx, '近くに予定の場所がないので、時刻で合わせました(移動中など)');
   });
 
   // 旅行の当日に開いたら、はじめから今の予定を出す
@@ -2259,7 +2278,7 @@ async function main() {
 // ---- 新しい版が出ていたら自動で読み直す(2026-11-19) ----
 // GitHub Pages のページは iPhone の Safari に最大10分ほど覚えられ、直した版がすぐ出なかった。
 // 開いた時に今の版の印(BUILD)を読みに行き、違えば1回だけ読み直す。直したら BUILD を変える(README の決まり)
-const BUILD = '2026-11-21-here1';
+const BUILD = '2026-11-21-here2';
 async function checkNewBuild() {
   try {
     const t = await (await fetch(location.pathname + '?build=' + Date.now(), { cache: 'no-store' })).text();
