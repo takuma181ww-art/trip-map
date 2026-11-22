@@ -1733,6 +1733,8 @@ async function gcalDay(date) {
   const out = [];
   for (const { c, ev } of lists) for (const e of ev) {
     if (e.status === 'cancelled') continue;
+    // 終日の予定は「日付」で見る(時刻で探すと、UTC のカレンダーの終日が次の日の朝9時までかかり、明日にも出てしまう)
+    if (e.start?.date && !(e.start.date <= date && date < (e.end?.date || addDays(e.start.date, 1)))) continue;
     const it = { id: 'g:' + e.id, gcal: true, cal: c.label, calId: c.id, link: e.htmlLink, name: e.summary || '(名前なし)',
                  time: e.start?.dateTime ? jstHM(e.start.dateTime) : '', end: e.end?.dateTime ? jstHM(e.end.dateTime) : undefined,
                  memo: stripHtml(e.description).replace('(トラベラーで足した予定)', '').split('\n').map(s => s.replace(/^[・\-\s]+/, '').trim()).filter(s => s && !s.includes(VISIT_MARK)).join('。'),
@@ -2445,7 +2447,7 @@ async function main() {
 // ---- 新しい版が出ていたら自動で読み直す(2026-11-19) ----
 // GitHub Pages のページは iPhone の Safari に最大10分ほど覚えられ、直した版がすぐ出なかった。
 // 開いた時に今の版の印(BUILD)を読みに行き、違えば1回だけ読み直す。直したら BUILD を変える(README の決まり)
-const BUILD = '2026-11-22-stock';
+const BUILD = '2026-11-22-allday';
 async function checkNewBuild() {
   try {
     const t = await (await fetch(location.pathname + '?build=' + Date.now(), { cache: 'no-store' })).text();
