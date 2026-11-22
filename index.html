@@ -1076,6 +1076,8 @@ function nowIndex() {
 // 「今ここ」は自分のいる場所で選ぶ(2026-11-21 Taku「時間どおりに動けていないと、時刻で選ぶと実際の行動とずれる」)。
 // 現在地から HERE_NEAR_M 以内に予定の場所があれば、いちばん近いもの(同じ場所が何度もあれば時刻が今に近い方)。なければ -1
 const HERE_NEAR_M = 400;
+// 今、予定のどれかの場所にいるか(100m 以内)。いなければ「今いるお店を記録する」を出す
+const atPlan = () => !!me && items.some(it => isPlace(it) && map.distance(me, [it.lat, it.lng]) <= 100);
 function hereIndex() {
   if (!me) return -1;
   const local = new Date(Date.now() + 9 * 3600000), mins = local.getUTCHours() * 60 + local.getUTCMinutes();
@@ -1325,6 +1327,32 @@ async function findPlacesGoogle(q, c) {
              ...(cc === 'kr' ? { kr: r.displayName?.text } : {}) };
   }).filter(r => r.lat != null);
 }
+// 今いる所のすぐ近くのお店(Places API の Nearby Search・近い順)。「今ここ」で、予定にないお店を記録する時に使う(2026-11-22)
+async function findNearbyGoogle(c) {
+  const res = await fetch('https://places.googleapis.com/v1/places:searchNearby', { method: 'POST', referrerPolicy: 'no-referrer-when-downgrade',
+    body: JSON.stringify({ includedTypes: ['restaurant', 'cafe', 'bakery', 'bar', 'meal_takeaway', 'tourist_attraction'], maxResultCount: 20, rankPreference: 'DISTANCE', languageCode: 'ja',
+      locationRestriction: { circle: { center: { latitude: c[0], longitude: c[1] }, radius: 250 } } }),
+    headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': PLACES_KEY,
+      'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.location,places.addressComponents' } });
+  if (!res.ok) throw new Error('nearby ' + res.status);
+  return ((await res.json()).places || []).map(r => {
+    const cc = (r.addressComponents || []).find(a => (a.types || []).includes('country'))?.shortText?.toLowerCase() || 'jp';
+    return { name: r.displayName?.text || '', addr: String(r.formattedAddress || '').replace(/^日本、\s*(〒\d{3}-\d{4}\s*)?/, ''),
+             lat: r.location?.latitude, lng: r.location?.longitude, country: cc, ...(cc === 'kr' ? { kr: r.displayName?.text } : {}) };
+  }).filter(r => r.lat != null && r.name);
+}
+async function findNearby() {
+  if (!me || !PLACES_KEY) return [];
+  const ck = 'near|' + me.map(v => v.toFixed(4)).join(',');   // 同じ場所(約10m)では探し直さない
+  if (findPlaces.cache.has(ck)) return findPlaces.cache.get(ck);
+  const usedKey = 'places-used:' + todayStr(), used = +(store('localStorage', usedKey) || 0);
+  if (used >= PLACES_DAILY_MAX) return [];
+  store('localStorage', usedKey, String(used + 1));
+  const r = (await findNearbyGoogle(me)).sort((a, b) => meters({ lat: me[0], lng: me[1] }, a) - meters({ lat: me[0], lng: me[1] }, b));
+  findPlaces.cache.set(ck, r);
+  return r;
+}
+let openHere = null;   // 「今ここ」から、今いるお店を記録するシートを開く(setupDailyAdd で入れる)
 async function findPlaces(q) {
   // 「35.68, 139.76」のように座標を貼った時はそのまま使う
   const ll = q.match(/(-?\d{1,2}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)/);
@@ -1363,14 +1391,14 @@ function setupDailyAdd() {
   const f = $('#dailyAdd'), sheet = $('#findSheet');
   let found = [];
   f.hidden = false;
-  // つないでいる時は、どのカレンダーに足すかを選ぶ(前に選んだもの → 個人)
+  // つないでいる時は、どのカレンダーに足すかを選ぶ(前に選んだもの → ファミリー。2026-11-22「個人」に入れた予定が奥様に出なかったので、初期値を家族にも出る方にした)
   const canAdd = DAILY ? gcalCals.filter(c => c.canWrite) : [];
   $('#calPickBox').hidden = !canAdd.length;
   if (canAdd.length) {
     const last = store('localStorage', CALPICK_KEY);
     $('#dCal').innerHTML = canAdd.map(c => `<option value="${esc(c.id)}">${esc(c.label)}${c.label === '個人' ? '(自分だけ)' : c.label === 'ファミリー' ? '(家族にも出る)' : ''}</option>`).join('') +
       '<option value="">この端末だけ(カレンダーに入れない)</option>';
-    $('#dCal').value = canAdd.some(c => c.id === last) || last === '' ? last : (canAdd.find(c => c.primary) || canAdd[0]).id;
+    $('#dCal').value = canAdd.some(c => c.id === last) || last === '' ? last : (canAdd.find(c => c.label === 'ファミリー') || canAdd.find(c => c.primary) || canAdd[0]).id;
   }
   f.addEventListener('submit', async e => {
     e.preventDefault();
@@ -1380,9 +1408,11 @@ function setupDailyAdd() {
     const assign = sheet.dataset.assign != null ? items[+sheet.dataset.assign] : null;
     sheet.classList.toggle('assign', !!assign);
     $('#dQuery2').value = q;
-    $('#foundHead').textContent = assign ? 'どこですか?(押すと行き先に決まります)' : 'どこですか?(押すと足します)';
+    const here = !assign && sheet.dataset.here != null;
+    $('#foundHead').textContent = assign ? 'どこですか?(押すと行き先に決まります)' : here ? 'どのお店ですか?(押すと「行けた」で記録します)' : 'どこですか?(押すと足します)';
     $('#findTitle').textContent = assign ? `「${assign.name}」の行き先を選ぶ` : `「${q}」を ${DAILY ? dailyLabel(data.date) : (String(data.title || '').match(/\d+日目/) || [''])[0] + ' ' + dailyLabel(data.date).replace(/ (今日|明日|昨日)$/, '')} に足す`;
-    $('#dTime').value = ''; $('#dMemo').value = '';
+    $('#dTime').value = here ? toHM(nowMin()) : ''; $('#dMemo').value = '';
+    if (here) $('#findTitle').textContent = '今いるお店を記録する';
     const ul = $('#foundList');
     ul.innerHTML = '<li><small>探しています…</small></li>';
     sheet.hidden = false;
@@ -1401,8 +1431,27 @@ function setupDailyAdd() {
     if (li.dataset.k == null) return;
     const k = +li.dataset.k;
     if (sheet.dataset.assign != null && k >= 0) { setEventPlace(+sheet.dataset.assign, found[k]); return; }
-    addDaily(k < 0 ? { name: e.currentTarget.dataset.q } : found[k]);
+    const entry = k < 0 ? { name: e.currentTarget.dataset.q } : found[k];
+    // 今いるお店の記録は、足すのと同時に「行けた」の印を付ける
+    if (sheet.dataset.here != null && k >= 0) { const v = loadVisits(); v[visitId(data.date, entry)] = { s: 'done', t: toHM(nowMin()), auto: false }; saveVisits(v); }
+    addDaily(entry);
   });
+  // 「今ここ」から: 今いる所に近いお店を近い順に出す(予定に入れていないお店に来た時。2026-11-22 Taku「飛ばして来た時に今いる場所を登録したい」)
+  openHere = async () => {
+    if (!DAILY || !me) return;
+    delete sheet.dataset.assign; sheet.classList.remove('assign'); sheet.dataset.here = '1';
+    $('#findTitle').textContent = '今いるお店を記録する';
+    $('#foundHead').textContent = 'どのお店ですか?(押すと「行けた」で記録します)';
+    $('#dQuery2').value = ''; $('#dTime').value = toHM(nowMin()); $('#dMemo').value = '';
+    const ul = $('#foundList');
+    ul.innerHTML = '<li><small>近くのお店を探しています…</small></li>';
+    sheet.hidden = false;
+    try { found = await findNearby(); } catch (err) { found = []; }
+    if (sheet.hidden || sheet.dataset.here == null) return;
+    ul.dataset.q = ''; ul.dataset.g = `https://www.google.com/maps/search/?api=1&query=${me[0]},${me[1]}`;
+    ul.innerHTML = found.map((r, k) => `<li data-k="${k}"><b>${esc(r.name)}</b><small>${esc(r.addr)}・約${Math.round(meters({ lat: me[0], lng: me[1] }, r) / 10) * 10}m</small></li>`).join('') +
+      `<li><small>${found.length ? 'ここにない時は' : '近くのお店が見つかりませんでした。'}上の欄にお店の名前を入れて探してください(ビルの中は位置がずれることがあります)。</small></li>`;
+  };
   // シートの中で名前を変えて探し直す(行き先を決める途中でも、そのまま続けられる)
   $('#reFind').addEventListener('submit', e => {
     e.preventDefault();
@@ -1412,7 +1461,7 @@ function setupDailyAdd() {
     f.requestSubmit();
   });
   sheet.addEventListener('click', e => {
-    if (e.target.id === 'findSheet' || e.target.closest('button')?.dataset.act === 'close') { sheet.hidden = true; delete sheet.dataset.assign; sheet.classList.remove('assign'); }
+    if (e.target.id === 'findSheet' || e.target.closest('button')?.dataset.act === 'close') { sheet.hidden = true; delete sheet.dataset.assign; delete sheet.dataset.here; sheet.classList.remove('assign'); }
   });
 }
 // ---- カレンダーなどから取り込む(2026-11-19) ----
@@ -1509,7 +1558,7 @@ function updateLeaveTimes() {
 // GOOGLE_CLIENT_ID は Google Cloud の「OAuth クライアント ID(ウェブ)」。公開してよい値(秘密の鍵ではない)
 const GOOGLE_CLIENT_ID = '80654326956-8t21h3idvvd1fl14rkahj97hdqemr0t2.apps.googleusercontent.com';
 const GCAL_SCOPE = 'https://www.googleapis.com/auth/calendar.calendarlist.readonly https://www.googleapis.com/auth/calendar.events';
-const GCAL_TOKEN_KEY = 'gcal-token', GEO_KEY = 'geo-cache', CALPICK_KEY = 'gcal-add-to';
+const GCAL_TOKEN_KEY = 'gcal-token', GEO_KEY = 'geo-cache', CALPICK_KEY = 'gcal-add-to2';   // 2026-11-22 初期値を「ファミリー」に変えた時に名前を変えた(前に覚えた「個人」を引きつがない)
 let gcalCals = [];   // [{ id, label, primary }]
 function gcalToken() {
   try { const t = JSON.parse(localStorage.getItem(GCAL_TOKEN_KEY) || 'null'); return t && t.exp > Date.now() + 60000 ? t.v : null; } catch (e) { return null; }
@@ -1545,6 +1594,9 @@ function gcalCatchReturn() {
   // 見えないつなぎ直しが通らなかった時は、何も言わずに帯を出す(押せば Google の画面でつなげる)
   if (h.get('error') || !h.get('access_token')) { if (!h.get('state').startsWith('s')) toast('つなげませんでした(' + (h.get('error') || '') + ')'); return false; }
   try { localStorage.setItem(GCAL_TOKEN_KEY, JSON.stringify({ v: h.get('access_token'), exp: Date.now() + (+h.get('expires_in') || 3600) * 1000 })); } catch (e) {}
+  // つなげたら「1回ためした」の印を消す。消さないと、同じタブを開いたままの人は2時間目から予定が出なくなる
+  // (2026-11-22 奥様の iPhone で「開けるたびに予定が消える」。印が残り、見えないつなぎ直しが二度と走らなかった)
+  store('sessionStorage', 'gcal-silent-tried', '');
   location.replace(location.pathname + back);
   return true;
 }
@@ -1701,7 +1753,7 @@ function bindAskPlaces() {
     } else if (a.dataset.askmore) {
       // 入力枠の検索シートを「この予定の行き先を決める」形で開く
       const i = +a.dataset.askmore;
-      $('#findSheet').dataset.assign = String(i);
+      delete $('#findSheet').dataset.here; $('#findSheet').dataset.assign = String(i);
       $('#dQuery').value = items[i].name;
       $('#dailyAdd').requestSubmit();
     } else if (a.dataset.asknone && confirm(`「${items[+a.dataset.asknone].name}」は場所のない予定にしますか?(次から聞きません)`)) setEventNoPlace(+a.dataset.asknone);
@@ -1720,7 +1772,7 @@ function openPlanner(focus = null) {
   $('#plTitle').textContent = dailyLabel(data.date) + ' の予定';
   const canAdd = gcalCals.filter(c => c.canWrite), last = store('localStorage', CALPICK_KEY);
   $('#plCal').innerHTML = canAdd.map(c => `<option value="${esc(c.id)}">${esc(c.label)}</option>`).join('') + '<option value="">この端末だけ</option>';
-  $('#plCal').value = canAdd.some(c => c.id === last) || last === '' ? last : (canAdd.find(c => c.primary) || canAdd[0] || { id: '' }).id;
+  $('#plCal').value = canAdd.some(c => c.id === last) || last === '' ? last : (canAdd.find(c => c.label === 'ファミリー') || canAdd.find(c => c.primary) || canAdd[0] || { id: '' }).id;
   if (!plMap) {
     plMap = L.map('plMap', { zoomControl: false });
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' }).addTo(plMap);
@@ -2247,13 +2299,15 @@ async function main() {
   $('#nowBtn').addEventListener('click', () => {
     if (DAILY && data.date !== todayStr()) { location.href = dailyHref(todayStr()); return; }
     if (DAILY && !items.some(it => it.time)) {
-      if (me) map.flyTo(me, Math.max(map.getZoom(), 15), { duration: .8 }); else { startWatch(); toast('現在地を探しています…'); }
+      if (me) { map.flyTo(me, Math.max(map.getZoom(), 15), { duration: .8 }); if (!atPlan() && openHere) openHere(); } else { startWatch(); toast('現在地を探しています…'); }
       return;
     }
     const n = nowIndex();
     if (!n.isDay) { setActive(n.idx, { scroll: true }); toast('旅行の日ではないので、時刻だけで合わせました'); return; }
     // 当日は、まず自分のいる場所で選ぶ。場所が分からない・近くに予定がない時だけ時刻で選ぶ
     const h = hereIndex();
+    // 日常で、予定の場所にいない(100m より遠い)時は、今いるお店を記録するシートも出す
+    if (DAILY && me && !atPlan() && openHere) openHere();
     if (h >= 0) { setActive(h, { scroll: true, fly: false }); showMeAndCard(h, `現在地のそばの「${items[h].name}」を表示しました`); return; }
     setActive(n.idx, { scroll: true, fly: !me });
     startWatch();
@@ -2278,7 +2332,7 @@ async function main() {
 // ---- 新しい版が出ていたら自動で読み直す(2026-11-19) ----
 // GitHub Pages のページは iPhone の Safari に最大10分ほど覚えられ、直した版がすぐ出なかった。
 // 開いた時に今の版の印(BUILD)を読みに行き、違えば1回だけ読み直す。直したら BUILD を変える(README の決まり)
-const BUILD = '2026-11-21-here2';
+const BUILD = '2026-11-22-herelog';
 async function checkNewBuild() {
   try {
     const t = await (await fetch(location.pathname + '?build=' + Date.now(), { cache: 'no-store' })).text();
@@ -2293,6 +2347,12 @@ main().finally(checkNewBuild);
 // 開きっぱなしでも、画面に戻ってきた時に新しい版を確かめる(2026-11-19。開いた時だけだと、開いたままの iPhone が古い版のままだった)
 let lastBuildCheck = Date.now();
 document.addEventListener('visibilitychange', () => {
+  // 開いたままで1時間たち、カレンダーとのつながりが切れていたら、戻ってきた時に見えないつなぎ直しをする(通らなかった時は印が残るので、くり返さない)
+  if (document.visibilityState === 'visible' && DAILY && GOOGLE_CLIENT_ID && gcalWas() && !gcalToken() && !store('sessionStorage', 'gcal-silent-tried')) {
+    store('sessionStorage', 'gcal-silent-tried', '1');
+    gcalConnect(true);
+    return;
+  }
   if (document.visibilityState !== 'visible' || Date.now() - lastBuildCheck < 60000) return;
   lastBuildCheck = Date.now();
   store('sessionStorage', 'build-reload', '');   // 戻ってきた時は、前に読み直した版でももう一度比べる
