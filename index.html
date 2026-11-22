@@ -707,6 +707,25 @@ function setVisit(i, s, auto = false) {
   else v[id] = { s, t: toHM(nowMin()), auto };
   saveVisits(v); refreshVisits();
   if (plMap && !$('#planner').hidden) renderPlanner(false);
+  pushVisit(it, data.date, v[id]);
+}
+// 行けた・保留を、カレンダーの予定にも書く(2026-11-22 Taku「行けた店も行けてない店もストックに」)。
+// private の visit(ほかの端末でも同じ色になる)と、説明の1行「【トラベラー】行けた(日付)」(Claude がトラベルリストに写す時に読む)。
+// 書けたら端末の記録に p(書いた中身)を残す。p がある記録は、カレンダーの方が変わっていたらカレンダーに合わせる(gcalDay)
+const VISIT_MARK = '【トラベラー】';
+async function pushVisit(it, date, v) {
+  if (!it?.gcal || !it.canWrite || !it.eventId) return;
+  const st = v?.s || '';
+  if ((it.pp?.visit || '') === st) return;
+  const pp = { ...(it.pp || {}), visit: st, visitAt: st ? `${date} ${v.t || ''}`.trim() : '' };
+  const desc = String(it.desc || '').split('\n').filter(l => !l.includes(VISIT_MARK))
+    .concat(st ? [`${VISIT_MARK}${st === 'done' ? '行けた' : 'まだ行けていない'}(${date})`] : []).join('\n');
+  try {
+    await gapi(`calendars/${encodeURIComponent(it.calId)}/events/${encodeURIComponent(it.eventId)}`, { method: 'PATCH', body: JSON.stringify({ description: desc, extendedProperties: { private: pp } }) });
+    it.pp = pp; it.desc = desc;
+    const all = loadVisits(), id = visitId(date, it);
+    if (all[id] && all[id].s === st) { all[id].p = st; saveVisits(all); }
+  } catch (e) {}
 }
 function refreshVisits() {
   // 見ていたカードが「済んだ」で右へ移った時は、同じ場所に来た次のカードを選ぶ。そうでなければ、見ていたカードのまま
@@ -1716,13 +1735,21 @@ async function gcalDay(date) {
     if (e.status === 'cancelled') continue;
     const it = { id: 'g:' + e.id, gcal: true, cal: c.label, calId: c.id, link: e.htmlLink, name: e.summary || '(名前なし)',
                  time: e.start?.dateTime ? jstHM(e.start.dateTime) : '', end: e.end?.dateTime ? jstHM(e.end.dateTime) : undefined,
-                 memo: stripHtml(e.description).replace('(トラベラーで足した予定)', '').split('\n').map(s => s.replace(/^[・\-\s]+/, '').trim()).filter(Boolean).join('。'),
+                 memo: stripHtml(e.description).replace('(トラベラーで足した予定)', '').split('\n').map(s => s.replace(/^[・\-\s]+/, '').trim()).filter(s => s && !s.includes(VISIT_MARK)).join('。'),
                  lat: null, lng: null, country: 'jp' };
     const pp = e.extendedProperties?.private || {};
     if (pp.arrive) it.arrive = pp.arrive;
     if (pp.after) it.after = pp.after;   // 「◯◯のあと」の予定(前の予定の id)
     it.pp = { ...pp };                   // 書き戻す時に、ほかの印(位置など)を消さないため
     it.eventId = e.id; it.canWrite = c.canWrite; it.noPlace = pp.noPlace === '1';
+    it.desc = e.description || '';
+    // 行けた・保留を端末とカレンダーでそろえる: まだ書いていない端末の記録はカレンダーへ。書いたあとでカレンダーが変わっていたら(ほかの端末で押した)カレンダーに合わせる
+    { const all = loadVisits(), vid = visitId(date, it), lv = all[vid], rv = pp.visit || '';
+      if (lv && lv.p !== lv.s) pushVisit(it, date, lv);
+      else if ((lv?.s || '') !== rv) {
+        if (rv) all[vid] = { s: rv, t: (pp.visitAt || '').split(' ')[1] || '', auto: false, p: rv }; else delete all[vid];
+        saveVisits(all);
+      } }
     // 読むだけのカレンダーで選んだ行き先は、端末に覚えたものを使う
     const own = !e.location && loadPlaceFix()[e.id];
     if (own) { if (own.lat == null) it.noPlace = true; else { it.lat = own.lat; it.lng = own.lng; it.googleQuery = own.q; it.exact = !!own.exact; } }
@@ -2418,7 +2445,7 @@ async function main() {
 // ---- 新しい版が出ていたら自動で読み直す(2026-11-19) ----
 // GitHub Pages のページは iPhone の Safari に最大10分ほど覚えられ、直した版がすぐ出なかった。
 // 開いた時に今の版の印(BUILD)を読みに行き、違えば1回だけ読み直す。直したら BUILD を変える(README の決まり)
-const BUILD = '2026-11-22-hold';
+const BUILD = '2026-11-22-stock';
 async function checkNewBuild() {
   try {
     const t = await (await fetch(location.pathname + '?build=' + Date.now(), { cache: 'no-store' })).text();
