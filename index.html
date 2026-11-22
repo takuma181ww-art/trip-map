@@ -327,6 +327,7 @@
   }
   .badge.fam { color: #fff; background: #2f9e44; }
   .badge.me { color: #fff; background: #1a73e8; }
+  .badge.floor { color: #fff; background: var(--accent); font-size: 12px; }
   /* 行き先はこれですか?(行き先のないカレンダーの予定) */
   .ask { margin-top: 8px; }
   .refind { display: flex; gap: 8px; margin-top: 12px; }
@@ -603,6 +604,17 @@ function memoHtml(memo) {
   }).join('');
 }
 
+// 何階か(ビルの中のお店)。住所の文字から読む: 「B1F」「地下1階」「5階」「6F」「1階〜4階」。分からなければ ''
+// (2026-11-22 Taku「階数がないと、結局 Google マップを開いて確かめることになる」)
+function floorOf(it) {
+  if (it.floor) return String(it.floor);
+  const t = String(it.googleQuery || it.addr || '').normalize('NFKC');
+  const one = '(?:地下\\s*(\\d{1,2})\\s*階|B(\\d{1,2})(?:F|階)?|(\\d{1,2})\\s*(?:階|F))';
+  const m = t.match(new RegExp('(?:^|[^A-Za-z0-9])' + one + '(?:\\s*[〜~～\\-]\\s*' + one + ')?(?![A-Za-z0-9])', 'i'));
+  if (!m) return '';
+  const f = (a, b, c) => a || b ? `地下${a || b}階` : `${c}階`;
+  return f(m[1], m[2], m[3]) + (m[4] || m[5] || m[6] ? '〜' + f(m[4], m[5], m[6]) : '');
+}
 function cardHtml(it, i) {
   if (it.type === 'move') {
     return `<article class="card move" role="listitem" data-i="${i}">
@@ -631,7 +643,7 @@ function cardHtml(it, i) {
       ${it.gcal ? `<a class="shift-btn" href="${esc(it.link)}" target="_blank" rel="noopener" style="text-decoration:none">カレンダー</a>`
         : DAILY || it.local ? `<button class="shift-btn" type="button" data-del="${i}">消す</button>` : shiftBtn(i, 'ここから再開')}
     </div>
-    <div class="name">${it.gcal ? `<span class="badge ${it.cal === 'ファミリー' ? 'fam' : it.cal === '個人' ? 'me' : ''}">${esc(it.cal)}</span> ` : ''}${esc(it.name)}${it.local && !DAILY ? ' <span class="badge">この iPhone だけ</span>' : ''}</div>
+    <div class="name">${it.gcal ? `<span class="badge ${it.cal === 'ファミリー' ? 'fam' : it.cal === '個人' ? 'me' : ''}">${esc(it.cal)}</span> ` : ''}${esc(it.name)}${floorOf(it) ? ` <span class="badge floor">${esc(floorOf(it))}</span>` : ''}${it.local && !DAILY ? ' <span class="badge">この iPhone だけ</span>' : ''}</div>
     <div class="memo">${memoHtml(it.memo)}</div>
     ${hasPlace || needsPlace(it) ? '' : '<div class="note">地図の印はありません</div>'}
     ${it.note ? `<div class="note">${esc(it.note)}</div>` : ''}
@@ -1300,6 +1312,7 @@ async function addDaily(entry) {
   const a = DAILY && !$('#dTime').value ? afterLast() : { after: hereLog ? afterLast().after : '', time: $('#dTime').value || '' };
   const it = { id: Date.now(), name: entry.name, time: a.time, after: a.after, memo: $('#dMemo').value.trim(),
                lat: entry.lat ?? null, lng: entry.lng ?? null, country: entry.country || 'jp' };
+  if (entry.addr) it.addr = entry.addr;   // 階数をカードに出すため
   if (entry.kr) it.kr = entry.kr;
   (all[box.key] = all[box.key] || []).push(it);
   if (!box.save(all)) { toast('この端末に保存できませんでした(プライベートブラウズ?)'); return; }
@@ -2335,7 +2348,7 @@ async function main() {
 // ---- 新しい版が出ていたら自動で読み直す(2026-11-19) ----
 // GitHub Pages のページは iPhone の Safari に最大10分ほど覚えられ、直した版がすぐ出なかった。
 // 開いた時に今の版の印(BUILD)を読みに行き、違えば1回だけ読み直す。直したら BUILD を変える(README の決まり)
-const BUILD = '2026-11-22-herelog2';
+const BUILD = '2026-11-22-floor';
 async function checkNewBuild() {
   try {
     const t = await (await fetch(location.pathname + '?build=' + Date.now(), { cache: 'no-store' })).text();
