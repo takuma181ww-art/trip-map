@@ -701,8 +701,15 @@ function setVisit(i, s, auto = false) {
   if (plMap && !$('#planner').hidden) renderPlanner(false);
 }
 function refreshVisits() {
-  const keep = active;
-  renderCards(); active = -1; setActive(keep, { fly: false });
+  // 見ていたカードが「済んだ」で右へ移った時は、同じ場所に来た次のカードを選ぶ。そうでなければ、見ていたカードのまま
+  const box = $('#cards'), pos = [...box.querySelectorAll('.card[data-i]')].findIndex(c => +c.dataset.i === active);
+  let keep = active;
+  renderCards();
+  const ord = cardOrder();
+  if (DAILY && keep >= 0 && pos >= 0 && ord.indexOf(keep) !== pos && visitOf(items[keep])) keep = ord[Math.min(pos, ord.length - 1)];
+  active = -1; setActive(keep, { fly: false });
+  const kc = DAILY && box.querySelector(`.card[data-i="${keep}"]`);
+  if (kc) box.scrollLeft = kc.offsetLeft - box.offsetLeft - 16;
   items.forEach((it, i) => {
     const el = markers[i]?.getElement()?.querySelector('.pin');
     if (!el) return;
@@ -848,6 +855,14 @@ function addLocateButton() {
   new Ctl().addTo(map);
 }
 
+// カードを並べる順(items の番号の列)。日常は、これから行く予定を左に、済んだ予定(行けた・行けなかった)を右に。どちらも番号の若い順
+// (2026-11-22 Taku「オレンジを左から、消化したものはグリーンでその右に」)。旅行は予定の順のまま
+function cardOrder() {
+  const idx = items.map((_, i) => i);
+  if (!DAILY) return idx;
+  const v = loadVisits(), fin = i => !!v[visitId(data.date, items[i])];
+  return [...idx.filter(i => !fin(i)), ...idx.filter(fin)];
+}
 function renderCards() {
   if (!items.length && DAILY) {
     $('#cards').innerHTML = `<article class="card empty-card on" role="listitem">
@@ -866,7 +881,7 @@ function renderCards() {
     });
     return;
   }
-  $('#cards').innerHTML = items.map(cardHtml).join('');
+  $('#cards').innerHTML = cardOrder().map(i => cardHtml(items[i], i)).join('');
   document.querySelectorAll('[data-naver]').forEach(a =>
     a.addEventListener('click', e => openNaver(items[+a.dataset.naver], e)));
   document.querySelectorAll('[data-station]').forEach(a => a.addEventListener('click', e => {
@@ -921,7 +936,7 @@ function setActive(i, { scroll = false, fly = true } = {}) {
     document.querySelectorAll('#dots span.on').forEach(c => c.classList.remove('on'));
     Object.values(markers).forEach(m => { m.getElement()?.classList.remove('on-top'); m.getElement()?.querySelector('.pin')?.classList.remove('on'); });
     document.querySelector(`.card[data-i="${i}"]`)?.classList.add('on');
-    document.querySelectorAll('#dots span')[i]?.classList.add('on');
+    document.querySelectorAll('#dots span')[cardOrder().indexOf(i)]?.classList.add('on');
     const m = markers[i];
     if (m) { m.getElement()?.classList.add('on-top'); m.getElement()?.querySelector('.pin')?.classList.add('on'); }
     Object.values(stationLayers).forEach(g => g.remove());
@@ -2351,7 +2366,7 @@ async function main() {
     const cards = [...box.querySelectorAll('.card')];
     const x = box.scrollLeft;
     let best = 0, bestD = Infinity;
-    cards.forEach((c, i) => { const d = Math.abs(c.offsetLeft - box.offsetLeft - 16 - x); if (d < bestD) { bestD = d; best = i; } });
+    cards.forEach((c, i) => { const d = Math.abs(c.offsetLeft - box.offsetLeft - 16 - x); if (d < bestD) { bestD = d; best = c.dataset.i != null ? +c.dataset.i : i; } });   // 並びが items の順とちがう(日常)ので、カードの data-i を使う
     setActive(best);
   };
   box.addEventListener('scroll', () => { clearTimeout(st); st = setTimeout(pick, 120); }, { passive: true });
@@ -2386,13 +2401,16 @@ async function main() {
     if (k >= 0) { setActive(k, { scroll: true, fly: false }); focus(k); toast(`「${items[k].name}」を足しました`); return; }
   }
   const n = nowIndex();
-  if (n.isDay && items.length) setActive(n.idx, { scroll: true, fly: false }), focus(n.idx);
-  else setActive(0, { fly: false });
+  // 日常で「今」の予定がもう済んでいる時は、いちばん左(これから行く最初の予定)を出す
+  const first = cardOrder()[0] ?? 0;
+  const start = DAILY && items[n.idx] && visitOf(items[n.idx]) ? first : n.idx;
+  if (n.isDay && items.length) setActive(start, { scroll: true, fly: false }), focus(start);
+  else setActive(first, { fly: false });
 }
 // ---- 新しい版が出ていたら自動で読み直す(2026-11-19) ----
 // GitHub Pages のページは iPhone の Safari に最大10分ほど覚えられ、直した版がすぐ出なかった。
 // 開いた時に今の版の印(BUILD)を読みに行き、違えば1回だけ読み直す。直したら BUILD を変える(README の決まり)
-const BUILD = '2026-11-22-allno';
+const BUILD = '2026-11-22-cardorder';
 async function checkNewBuild() {
   try {
     const t = await (await fetch(location.pathname + '?build=' + Date.now(), { cache: 'no-store' })).text();
