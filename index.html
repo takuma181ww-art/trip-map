@@ -377,6 +377,14 @@
   .pl-drag { flex: 0 0 auto; align-self: stretch; display: flex; align-items: center; justify-content: center; width: 44px; margin: -10px 0 -10px -10px; text-align: center; font-size: 22px; color: var(--sub); cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
   .pl-row.dragging { opacity: .85; box-shadow: 0 10px 30px rgba(0,0,0,.25); position: relative; z-index: 5; }
   .pl-row.drop-before { box-shadow: 0 -3px 0 var(--accent), var(--shadow); }
+  .pl-row.drop-after { box-shadow: 0 3px 0 var(--accent), var(--shadow); }
+  /* 済んだ予定は下に並び、番号の色を変える(これから=オレンジ・行けた=緑・行けなかった=灰色) */
+  .pl-row.fin { box-shadow: none; background: var(--chip); }
+  .pl-row.fin .pl-name { color: var(--sub); }
+  .pl-row.done .pl-no { background: #2f9e44; }
+  .pl-row.skip .pl-no { background: #868e96; }
+  .pl-drag.off { cursor: default; touch-action: auto; font-size: 18px; font-weight: 800; }
+  .pl-row.done .pl-drag.off { color: #2f9e44; }
   #plRows.drop-end { box-shadow: 0 3px 0 var(--accent); }
   .pl-time small { display: block; font-size: 11px; font-weight: 700; color: var(--accent); line-height: 1.3; }
   .after-l { font-size: 14px; font-weight: 800; color: var(--accent); }
@@ -687,6 +695,7 @@ function setVisit(i, s, auto = false) {
   if (!auto && v[id]?.s === s) delete v[id];  // 同じボタンをもう一度押すと消す
   else v[id] = { s, t: toHM(nowMin()), auto };
   saveVisits(v); refreshVisits();
+  if (plMap && !$('#planner').hidden) renderPlanner(false);
 }
 function refreshVisits() {
   const keep = active;
@@ -1822,7 +1831,8 @@ function plRowHtml(it, i) {
       : '<small>見つかりませんでした</small>'}
       <div class="pl-acts"><button type="button" data-plmore="${i}">名前を変えて探す</button><button type="button" data-plnone="${i}">場所はない</button></div></div>`;
   }
-  return `<div class="pl-row${plSel === i ? ' on' : ''}" data-plrow="${i}"><span class="pl-drag" data-drag="${i}" aria-label="ドラッグで並べかえ">≡</span><div class="pl-time">${it.no ? `<span class="pl-no">${it.no}</span>` : ''}${it.time && !timeLabel(it) ? `<span class="pl-hm">${hm(it.time)}</span>` : it.no ? '' : '—'}</div>
+  const vs = visitOf(it)?.s || '';   // done = 行けた・skip = 行けなかった
+  return `<div class="pl-row${plSel === i ? ' on' : ''}${vs ? ' fin ' + vs : ''}" data-plrow="${i}">${vs ? `<span class="pl-drag off" aria-hidden="true">${vs === 'done' ? '✓' : '✕'}</span>` : `<span class="pl-drag" data-drag="${i}" aria-label="ドラッグで並べかえ">≡</span>`}<div class="pl-time">${it.no ? `<span class="pl-no">${it.no}</span>` : ''}${it.time && !timeLabel(it) ? `<span class="pl-hm">${hm(it.time)}</span>` : it.no ? '' : '—'}</div>
     <div class="pl-main"><div class="pl-name">${badge}${esc(it.name)}</div>${where}${ask}</div></div>`;
 }
 function plFoundHtml() {
@@ -1836,7 +1846,10 @@ function renderPlanner(fit = true) {
   note.hidden = plAssign == null;
   if (plAssign != null) note.textContent = `「${items[plAssign].name}」の行き先を探しています(見つかった場所を押すと決まります)`;
   $('#plFound').innerHTML = plFoundHtml();
-  $('#plRows').innerHTML = items.length ? items.map(plRowHtml).join('') : '<p class="hint">この日の予定はまだありません。上の欄で行きたい場所を探して足してください。</p>';
+  // これから行く予定を上に、済んだ予定(行けた・行けなかった)は下へ。どちらも元の順のまま(2026-11-22 Taku「済んだら下にスライドして、色分け」)
+  const idx = items.map((_, i) => i), todo = idx.filter(i => !visitOf(items[i])), fin = idx.filter(i => visitOf(items[i]));
+  const rowsHtml = todo.map(i => plRowHtml(items[i], i)).join('') + (fin.length ? '<div class="pl-h pl-fin-h">済んだ予定(緑=行けた・灰色=行けなかった)</div>' + fin.map(i => plRowHtml(items[i], i)).join('') : '');
+  $('#plRows').innerHTML = items.length ? rowsHtml : '<p class="hint">この日の予定はまだありません。上の欄で行きたい場所を探して足してください。</p>';
   drawPlannerMap(fit);
   fillPlannerCands();
 }
@@ -1871,7 +1884,8 @@ function drawPlannerMap(fit) {
   items.forEach((it, i) => {
     if (it.lat == null) return;
     const ll = [it.lat, it.lng];
-    pin(ll, plSel === i ? 'on' : '', it.no || '', 28).on('click', () => selectPlRow(i));
+    const vs = visitOf(it)?.s || '';
+    pin(ll, (plSel === i ? 'on ' : '') + vs, it.no || '', 28).on('click', () => selectPlRow(i));
     if (prev) L.polyline([prev, ll], { color: accent, weight: 3, opacity: .6, interactive: false }).addTo(plLayer);
     prev = ll; pts.push(ll); if (plSel === i) selPts.push(ll);
   });
@@ -1988,20 +2002,24 @@ function setupPlDrag() {
     const row = h.closest('.pl-row'), from = +row.dataset.plrow, y0 = e.clientY;
     row.classList.add('dragging');
     h.setPointerCapture(e.pointerId);
-    let to = from;
+    let to = from, dest = from;
     const move = ev => {
       row.style.transform = `translateY(${ev.clientY - y0}px)`;
-      const rows = [...box.querySelectorAll('.pl-row')].filter(r => r !== row);
+      const rows = [...box.querySelectorAll('.pl-row:not(.fin)')].filter(r => r !== row);
       to = rows.length;
       for (let k = 0; k < rows.length; k++) { const r = rows[k].getBoundingClientRect(); if (ev.clientY < r.top + r.height / 2) { to = k; break; } }
       rows.forEach((r, k) => r.classList.toggle('drop-before', k === to));
-      box.classList.toggle('drop-end', to === rows.length);
+      box.classList.toggle('drop-end', to === rows.length && !box.querySelector('.pl-row.fin'));
+      rows.at(-1)?.classList.toggle('drop-after', to === rows.length);
+      // 画面の「何番目」を、items の「何番目」に直す(済んだ予定が下に分かれているため)
+      const at = r => { const j = +r.dataset.plrow; return j - (from < j ? 1 : 0); };
+      dest = to < rows.length ? at(rows[to]) : rows.length ? at(rows.at(-1)) + 1 : from;
     };
     const up = () => {
       h.removeEventListener('pointermove', move);
       row.style.transform = ''; row.classList.remove('dragging'); box.classList.remove('drop-end');
-      box.querySelectorAll('.drop-before').forEach(r => r.classList.remove('drop-before'));
-      if (to !== from) moveItem(from, to);
+      box.querySelectorAll('.drop-before, .drop-after').forEach(r => r.classList.remove('drop-before', 'drop-after'));
+      if (dest !== from) moveItem(from, dest);
     };
     h.addEventListener('pointermove', move);
     h.addEventListener('pointerup', up, { once: true });
@@ -2020,7 +2038,7 @@ async function moveItem(from, to) {
     const prev = arr[k - 1], next = arr[k + 1];
     const after = prev ? String(prev.id) : '';
     // 前の予定が時間なしの時は、今の時刻を消さない(記録した時刻 12:07 が消えていた)
-    const time = prev ? (endOf(prev) || x.time) : (next?.time ? toHM(toMin(next.time) - 60) : x.time);
+    const time = prev ? (endOf(prev) || x.time) : (next?.time && x.time ? toHM(toMin(next.time) - 60) : x.time)   /* 時間なしの予定に、仮の時刻を付けない */;
     if (x.after !== after || x.time !== time) {
       x.after = after; x.time = time; x.t0 = time; if (time) x.end = toHM(toMin(time) + 60);
       changed.push(x);
@@ -2370,7 +2388,7 @@ async function main() {
 // ---- 新しい版が出ていたら自動で読み直す(2026-11-19) ----
 // GitHub Pages のページは iPhone の Safari に最大10分ほど覚えられ、直した版がすぐ出なかった。
 // 開いた時に今の版の印(BUILD)を読みに行き、違えば1回だけ読み直す。直したら BUILD を変える(README の決まり)
-const BUILD = '2026-11-22-cardno';
+const BUILD = '2026-11-22-fin';
 async function checkNewBuild() {
   try {
     const t = await (await fetch(location.pathname + '?build=' + Date.now(), { cache: 'no-store' })).text();
