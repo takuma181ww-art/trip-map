@@ -427,6 +427,14 @@
   .found li b { font-size: 15px; }
   .found li small { color: var(--sub); font-size: 12px; line-height: 1.4; }
   .found li.plain b { color: var(--accent); }
+  /* ストック(トラベルリストの写し) */
+  #dailyAdd #stockBtn { background: var(--card); color: var(--accent); border: 1px solid var(--line); padding: 0 10px; }
+  #dailyAdd #stockBtn[hidden] { display: none; }
+  #stockQ { width: 100%; box-sizing: border-box; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--text); font-family: inherit; font-size: 16px; padding: 9px 10px; }
+  .found .tg { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 8px; font-size: 11px; font-weight: 700; background: var(--line); color: var(--sub); vertical-align: 1px; }
+  .found .tg.mada { background: var(--accent); color: #fff; }
+  .pin.stock { width: 20px; height: 20px; font-size: 10px; border-width: 2px; border-style: dashed; opacity: .6; box-shadow: none; }
+  .pin.stock.mada { opacity: .9; border-style: solid; }
 </style>
 </head>
 <body>
@@ -448,6 +456,7 @@
   <form id="dailyAdd" hidden autocomplete="off">
     <input id="dQuery" type="search" enterkeyhint="search" placeholder="行きたい場所を入れる(例: 駅前のパン屋)" maxlength="80" aria-label="行きたい場所">
     <button type="submit">探す</button>
+    <button type="button" id="stockBtn" hidden aria-label="ストック(トラベルリスト)から足す">ストック</button>
   </form>
   <button id="gcalBar" type="button" hidden></button>
   <div id="dots" aria-hidden="true"></div>
@@ -500,6 +509,15 @@
       <div id="plRows"></div>
     </div>
     <div id="plMap"></div>
+  </div>
+</div>
+<div id="stockSheet" class="sheet-wrap" hidden>
+  <div class="sheet" role="dialog" aria-label="ストックから足す">
+    <h2>ストックから足す</h2>
+    <input id="stockQ" type="search" enterkeyhint="search" placeholder="エリアやお店の名前でしぼる(例: 丸の内・カフェ)" aria-label="ストックをしぼる">
+    <ul class="found" id="stockList"></ul>
+    <p class="hint">TakuVLOG トラベルリストの写しです(家族のカレンダーにつないだ人だけが読めます)。押すと、場所を確かめてからこの日に足します。</p>
+    <div class="row"><button type="button" data-act="close">やめる</button></div>
   </div>
 </div>
 <div id="findSheet" class="sheet-wrap" hidden>
@@ -842,6 +860,7 @@ function startWatch() {
       if (DAILY && !places().length) map.setView(me, 15);
     } else { meMarker.setLatLng(me); meCircle.setLatLng(me).setRadius(acc); }
     drawPlMe();
+    drawStockPins();
     if (fitPending) { const f = fitPending; fitPending = null; showMeAndCard(f.i, f.toastPrefix); }
     autoVisit(pos);
     if (!updateGoTimes.t) updateGoTimes.t = setTimeout(() => { updateGoTimes.t = 0; updateGoTimes(); }, 3000);
@@ -1542,6 +1561,112 @@ function setupDailyAdd() {
     if (e.target.id === 'findSheet' || e.target.closest('button')?.dataset.act === 'close') { sheet.hidden = true; delete sheet.dataset.assign; delete sheet.dataset.here; sheet.classList.remove('assign'); }
   });
 }
+// ---- ストック(TakuVLOG トラベルリストの写し。2026-11-22) ----
+// リストは裏の倉庫、トラベラーが表。Mac が1日に何度かリストを写し、暗号にして stock.enc として置く(中身は公開のページからは読めない)。
+// 鍵は家族のカレンダーの 2020-01-01 の予定「トラベラーの鍵」の説明にある(カレンダーにつないだ本人と家族だけが読める。新しい許可は要らない)。
+// ①「ストック」ボタン: エリアや名前でしぼって、押すとこの日に足す(「まだ」が上)  ② 地図: 近くの「行っていない」お店をうすい印で出す
+const STOCK_KEY = 'stock-key', STOCK_CACHE = 'stock-cache';
+const STOCK_NEAR_M = 3000, STOCK_PIN_MAX = 12;
+let stock = [], stockLayer = null, stockDrawnAt = null;
+const b64bytes = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+// 鍵は「#stockkey=…」の付いたリンクを1回開くと、この端末に入る(「#」より後ろはサーバーに送られない)。入れたらすぐ住所から消す
+(() => {
+  const m = /[#&]stockkey=([^&]+)/.exec(location.hash);
+  if (!m) return;
+  store('localStorage', STOCK_KEY, decodeURIComponent(m[1]));
+  history.replaceState(null, '', location.pathname + location.search);
+})();
+async function stockKey(fresh) {
+  const had = !fresh && store('localStorage', STOCK_KEY);
+  if (had) return had;
+  if (!gcalToken()) return '';
+  const cals = [...gcalCals].sort((a, b) => (b.label === 'ファミリー') - (a.label === 'ファミリー'));
+  for (const c of cals) {
+    try {
+      const r = await gapi(`calendars/${encodeURIComponent(c.id)}/events?timeMin=2019-12-31T00:00:00Z&timeMax=2020-01-03T00:00:00Z&singleEvents=true&maxResults=20`);
+      for (const e of r.items || []) {
+        const m = /stock-key:([A-Za-z0-9+\/=]{40,})/.exec(e.description || '');
+        if (m) { store('localStorage', STOCK_KEY, m[1]); return m[1]; }
+      }
+    } catch (e) { /* 次のカレンダーを見る */ }
+  }
+  return '';
+}
+async function stockDecrypt(txt, key) {
+  const raw = b64bytes(txt.trim());
+  const k = await crypto.subtle.importKey('raw', b64bytes(key), 'AES-GCM', false, ['decrypt']);
+  const z = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: raw.slice(0, 12) }, k, raw.slice(12));
+  const text = await new Response(new Blob([z]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
+  return JSON.parse(text).items || [];
+}
+async function loadStock() {
+  if (!DAILY) return;
+  try { stock = JSON.parse(store('localStorage', STOCK_CACHE) || '[]') || []; } catch (e) { stock = []; }
+  if (stock.length) showStock();   // 前に読んだ写しをすぐ出す(電波がなくても使える)
+  try {
+    const res = await fetch('stock.enc', { cache: 'no-cache' });
+    if (!res.ok) return;
+    const txt = await res.text();
+    let list;
+    try { list = await stockDecrypt(txt, await stockKey()); }
+    catch (e) { list = await stockDecrypt(txt, await stockKey(true)); }   // 鍵を替えた時は、カレンダーから読み直す
+    stock = list;
+    store('localStorage', STOCK_CACHE, JSON.stringify(list));
+    showStock();
+  } catch (e) { /* 鍵が読めない人(家族のカレンダーがない)には出さない */ }
+}
+function showStock() {
+  $('#stockBtn').hidden = !stock.length;
+  drawStockPins(true);
+}
+// 並び: まだ → 印なし → 確認中 → 行った。今いる所から 50km より遠いお店(旅先の分)は下へ
+const stockRank = e => (({ 'まだ': 0, '': 1, '確認中': 2, '行った': 3 })[e.t] ?? 1) + (stockDist(e) < Infinity && stockDist(e) > 50000 ? 10 : 0);
+const stockDist = e => me && e.lat != null ? meters({ lat: me[0], lng: me[1] }, e) : Infinity;
+const stockPlanned = e => items.some(it => it.name && (it.name === e.n || it.name.includes(e.n) || e.n.includes(it.name)));
+function renderStockList() {
+  const q = $('#stockQ').value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const list = stock.map((e, k) => ({ e, k }))
+    .filter(({ e }) => q.every(w => `${e.n} ${e.a} ${e.s || ''} ${e.m}`.toLowerCase().includes(w)))
+    .sort((a, b) => stockRank(a.e) - stockRank(b.e) || stockDist(a.e) - stockDist(b.e) || a.k - b.k);
+  $('#stockList').innerHTML = list.slice(0, 80).map(({ e, k }) => {
+    const d = stockDist(e);
+    return `<li data-k="${k}"><b>${esc(e.n)}${e.t ? `<span class="tg${e.t === 'まだ' ? ' mada' : ''}">${esc(e.t)}</span>` : ''}</b>` +
+      `<small>${esc(e.a.replace(/[((].*/, ''))}${e.s ? '・' + esc(e.s) : ''}${d < Infinity ? `・約${d < 950 ? Math.round(d / 50) * 50 + 'm' : (d / 1000).toFixed(1) + 'km'}` : ''}${e.m ? ' — ' + esc(e.m.slice(0, 44)) : ''}</small></li>`;
+  }).join('') || '<li><small>当てはまるお店がありません。ことばを変えてください。</small></li>';
+}
+// ストックのお店をこの日に足す: いつもの「探す」に名前と住所を渡し、Google の場所で確かめてから足す(位置がずれないように)
+function pickStock(e) {
+  const sheet = $('#findSheet');
+  $('#stockSheet').hidden = true;
+  delete sheet.dataset.assign; delete sheet.dataset.here; sheet.classList.remove('assign');
+  if (map) map.closePopup();
+  $('#dQuery').value = e.q || e.n;
+  $('#dailyAdd').requestSubmit();
+}
+function setupStock() {
+  $('#stockBtn').addEventListener('click', () => { $('#stockQ').value = ''; renderStockList(); $('#stockSheet').hidden = false; });
+  $('#stockQ').addEventListener('input', renderStockList);
+  $('#stockList').addEventListener('click', ev => { const li = ev.target.closest('li[data-k]'); if (li) pickStock(stock[+li.dataset.k]); });
+  $('#stockSheet').addEventListener('click', ev => { if (ev.target.id === 'stockSheet' || ev.target.closest('button')?.dataset.act === 'close') $('#stockSheet').hidden = true; });
+}
+// 近くの「まだ行っていない」お店を、うすい印で地図に出す(今いる所から 3km、いなければその日の予定の場所から 1.5km。近い順に12個まで)
+function drawStockPins(force = false) {
+  if (!DAILY || !map || !stock.length) return;
+  if (!force && stockDrawnAt && me && meters({ lat: stockDrawnAt[0], lng: stockDrawnAt[1] }, { lat: me[0], lng: me[1] }) < 300) return;
+  stockDrawnAt = me ? [...me] : stockDrawnAt;
+  const near = e => Math.min(stockDist(e) <= STOCK_NEAR_M ? stockDist(e) : Infinity,
+    ...places().map(p => { const d = meters(p, e); return d <= 1500 ? d + STOCK_NEAR_M : Infinity; }));
+  const list = stock.map((e, k) => ({ e, k, d: e.lat != null && e.t !== '行った' && !stockPlanned(e) ? near(e) : Infinity }))
+    .filter(x => x.d < Infinity).sort((a, b) => a.d - b.d).slice(0, STOCK_PIN_MAX);
+  if (stockLayer) stockLayer.remove();
+  stockLayer = L.layerGroup(list.map(({ e, k }) => {
+    const m = L.marker([e.lat, e.lng], { icon: L.divIcon({ className: '', html: `<div class="pin stock${e.t === 'まだ' ? ' mada' : ''}">★</div>`, iconSize: [20, 20], iconAnchor: [10, 10] }),
+      zIndexOffset: -500, keyboard: false, title: e.n });
+    m.bindPopup(`<div class="drop-pop"><b>${esc(e.n)}</b><small>ストック${e.t ? '(' + esc(e.t) + ')' : ''}・だいたいの位置${e.m ? '<br>' + esc(e.m.slice(0, 60)) : ''}</small><button type="button">この日に足す</button></div>`);
+    m.on('popupopen', ev => { const b = ev.popup.getElement()?.querySelector('button'); if (b) b.onclick = () => pickStock(stock[k]); });
+    return m;
+  })).addTo(map);
+}
 // ---- カレンダーなどから取り込む(2026-11-19) ----
 // リンクの #add=<base64url の JSON> で、日常の予定をまとめて足す(ショートカットや Claude がつくるリンク)。
 // 「#」より後ろはサーバーに送られないので、予定の中身はネットの向こうに出ない。
@@ -1681,7 +1806,7 @@ function gcalCatchReturn() {
 function gcalDisconnect() {
   if (!confirm('この端末で Google カレンダーとのつながりを切りますか?(カレンダーの予定は消えません)')) return;
   const t = gcalToken();
-  try { localStorage.removeItem(GCAL_TOKEN_KEY); } catch (e) {}
+  try { localStorage.removeItem(GCAL_TOKEN_KEY); localStorage.removeItem(STOCK_KEY); localStorage.removeItem(STOCK_CACHE); } catch (e) {}
   if (t) fetch('https://oauth2.googleapis.com/revoke?token=' + encodeURIComponent(t), { method: 'POST' }).catch(() => {});
   location.reload();
 }
@@ -2408,6 +2533,7 @@ async function main() {
   };
   box.addEventListener('scroll', () => { clearTimeout(st); st = setTimeout(pick, 120); }, { passive: true });
 
+  if (DAILY) { setupStock(); loadStock(); }
   $('#nowBtn').addEventListener('click', () => {
     if (DAILY && data.date !== todayStr()) { location.href = dailyHref(todayStr()); return; }
     if (DAILY && !items.some(it => it.time)) {
@@ -2447,7 +2573,7 @@ async function main() {
 // ---- 新しい版が出ていたら自動で読み直す(2026-11-19) ----
 // GitHub Pages のページは iPhone の Safari に最大10分ほど覚えられ、直した版がすぐ出なかった。
 // 開いた時に今の版の印(BUILD)を読みに行き、違えば1回だけ読み直す。直したら BUILD を変える(README の決まり)
-const BUILD = '2026-11-22-allday';
+const BUILD = '2026-11-22-stock';
 async function checkNewBuild() {
   try {
     const t = await (await fetch(location.pathname + '?build=' + Date.now(), { cache: 'no-store' })).text();
