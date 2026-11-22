@@ -1616,7 +1616,6 @@ async function loadStock() {
   } catch (e) { /* 鍵が読めない人(家族のカレンダーがない)には出さない */ }
 }
 function showStock() {
-  $('#stockBtn').hidden = !stock.length;
   drawStockPins(true);
 }
 // 並び: まだ → 印なし → 確認中 → 行った。今いる所から 50km より遠いお店(旅先の分)は下へ
@@ -1644,7 +1643,20 @@ function pickStock(e) {
   $('#dailyAdd').requestSubmit();
 }
 function setupStock() {
-  $('#stockBtn').addEventListener('click', () => { $('#stockQ').value = ''; renderStockList(); $('#stockSheet').hidden = false; });
+  $('#stockBtn').hidden = false;
+  $('#stockBtn').addEventListener('click', async () => {
+    if (!stock.length) {   // 鍵がまだない端末(ホーム画面のアプリは Safari と記憶が別なので、リンクを開くだけでは入らない)→ ここで貼ってもらう
+      const v = prompt('ストックの鍵のリンク(または鍵)を貼ってください');
+      if (!v) return;
+      const m = /stockkey=([^&\s]+)/.exec(v);
+      let k = (m ? m[1] : v).trim();
+      try { k = decodeURIComponent(k); } catch (e) {}
+      store('localStorage', STOCK_KEY, k);
+      await loadStock();
+      if (!stock.length) { try { localStorage.removeItem(STOCK_KEY); } catch (e) {} alert('鍵が合いませんでした。リンクをもう一度コピーして貼ってください'); return; }
+    }
+    $('#stockQ').value = ''; renderStockList(); $('#stockSheet').hidden = false;
+  });
   $('#stockQ').addEventListener('input', renderStockList);
   $('#stockList').addEventListener('click', ev => { const li = ev.target.closest('li[data-k]'); if (li) pickStock(stock[+li.dataset.k]); });
   $('#stockSheet').addEventListener('click', ev => { if (ev.target.id === 'stockSheet' || ev.target.closest('button')?.dataset.act === 'close') $('#stockSheet').hidden = true; });
@@ -2573,7 +2585,7 @@ async function main() {
 // ---- 新しい版が出ていたら自動で読み直す(2026-11-19) ----
 // GitHub Pages のページは iPhone の Safari に最大10分ほど覚えられ、直した版がすぐ出なかった。
 // 開いた時に今の版の印(BUILD)を読みに行き、違えば1回だけ読み直す。直したら BUILD を変える(README の決まり)
-const BUILD = '2026-11-22-stock';
+const BUILD = '2026-11-22-stockkey';
 async function checkNewBuild() {
   try {
     const t = await (await fetch(location.pathname + '?build=' + Date.now(), { cache: 'no-store' })).text();
