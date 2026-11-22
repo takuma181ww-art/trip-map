@@ -162,6 +162,9 @@
     background: var(--accent); color: #fff; display: grid; place-items: center; font-weight: 700; font-size: 14px;
   }
   .num.plain { background: var(--chip); color: var(--sub); }
+  /* 日常の番号の色: これから=オレンジ・行けた=緑・行けなかった=灰色(大きな画面・地図の印と同じ) */
+  .num.done { background: #2f9e44; }
+  .num.skip { background: #868e96; }
   .time { font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; }
   .name { font-size: 16px; font-weight: 700; margin: 8px 0 6px; line-height: 1.35; }
   .memo { flex: 1; min-height: 0; overflow-y: auto; font-size: 14px; line-height: 1.55; color: var(--text); }
@@ -653,7 +656,7 @@ function cardHtml(it, i) {
   }
   return `<article class="card" role="listitem" data-i="${i}">
     <div class="card-head">
-      <div class="num ${hasPlace ? '' : 'plain'}">${it.no ?? ''}</div>
+      <div class="num ${DAILY ? (visitOf(it)?.s || '') : hasPlace ? '' : 'plain'}">${it.no ?? ''}</div>
       <div class="time">${timeLabel(it) ? '' : it.time ? hm(it.time) : DAILY || it.local ? '<span class="was">時間なし</span>' : ''}${wasHtml(i)}</div>
       ${it.gcal ? `<a class="shift-btn" href="${esc(it.link)}" target="_blank" rel="noopener" style="text-decoration:none">カレンダー</a>`
         : DAILY || it.local ? `<button class="shift-btn" type="button" data-del="${i}">消す</button>` : shiftBtn(i, 'ここから再開')}
@@ -1273,7 +1276,7 @@ function dailyItems(date) {
   const list = (loadDaily()[date] || []).map(x => ({ ...x }));
   list.sort((a, b) => (a.time ? 0 : 1) - (b.time ? 0 : 1) || (a.time || '').localeCompare(b.time || '') || a.id - b.id);
   let no = 0;
-  list.forEach(it => { it.memo = it.memo || ''; if (it.lat != null) it.no = ++no; });
+  list.forEach(it => { it.memo = it.memo || ''; it.no = ++no; });   // 日常は、場所が未定の予定にも番号を付ける
   return list;
 }
 // 旅行の日に入力枠で足した場所も、その端末の中だけ(公開の data/ は変えない)。キーは「旅行の id|日付」
@@ -2148,7 +2151,8 @@ function sortDay(list) {
   list.filter(it => !seen.has(it)).forEach(it => out.push(it));   // 念のため(輪になった時など)
   list.splice(0, list.length, ...out);
   let no = 0;
-  list.forEach(it => { delete it.no; if (it.lat != null) it.no = ++no; });
+  // 日常は全部の予定に番号(2026-11-22 Taku「済んだものは緑の番号、残りは赤の番号」)。旅行は地図に印のある所だけ
+  list.forEach(it => { delete it.no; if (DAILY || it.lat != null) it.no = ++no; });
   return list;
 }
 async function setupDaily() {
@@ -2388,7 +2392,7 @@ async function main() {
 // ---- 新しい版が出ていたら自動で読み直す(2026-11-19) ----
 // GitHub Pages のページは iPhone の Safari に最大10分ほど覚えられ、直した版がすぐ出なかった。
 // 開いた時に今の版の印(BUILD)を読みに行き、違えば1回だけ読み直す。直したら BUILD を変える(README の決まり)
-const BUILD = '2026-11-22-fin';
+const BUILD = '2026-11-22-allno';
 async function checkNewBuild() {
   try {
     const t = await (await fetch(location.pathname + '?build=' + Date.now(), { cache: 'no-store' })).text();
