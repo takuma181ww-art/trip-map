@@ -369,7 +369,8 @@
   .pl-h { font-size: 13px; font-weight: 800; color: var(--sub); margin: 14px 0 6px; }
   .pl-row { display: flex; gap: 10px; padding: 10px; border-radius: 12px; background: var(--card); margin-bottom: 8px; border: 1.5px solid transparent; box-shadow: var(--shadow); }
   .pl-row.on { border-color: var(--accent); }
-  .pl-drag { flex: 0 0 auto; align-self: center; width: 22px; text-align: center; font-size: 20px; color: var(--sub); cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
+  /* つまみは指で押しやすい大きさに(行の高さいっぱい・幅44px。22px では指が外れて画面が動くだけだった 2026-11-22) */
+  .pl-drag { flex: 0 0 auto; align-self: stretch; display: flex; align-items: center; justify-content: center; width: 44px; margin: -10px 0 -10px -10px; text-align: center; font-size: 22px; color: var(--sub); cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
   .pl-row.dragging { opacity: .85; box-shadow: 0 10px 30px rgba(0,0,0,.25); position: relative; z-index: 5; }
   .pl-row.drop-before { box-shadow: 0 -3px 0 var(--accent), var(--shadow); }
   #plRows.drop-end { box-shadow: 0 3px 0 var(--accent); }
@@ -1995,10 +1996,13 @@ async function moveItem(from, to) {
   if (moved.gcal && !moved.canWrite) { toast('読むだけのカレンダーの予定は動かせません'); return; }
   const changed = [];
   arr.forEach((x, k) => {
-    if (x !== moved && !x.after) return;   // 時刻の決まった予定は、そのまま
+    // 時刻の決まった予定(「◯◯のあと」でないもの)は、そのまま。時間なしの予定は、並べた順を「◯◯のあと」で覚える
+    // (2026-11-22 時間なしどうしを入れかえても覚えず、開き直すと元の順に戻っていた)
+    if (x !== moved && !x.after && x.time) return;
     const prev = arr[k - 1], next = arr[k + 1];
     const after = prev ? String(prev.id) : '';
-    const time = prev ? endOf(prev) : (next?.time ? toHM(toMin(next.time) - 60) : x.time);
+    // 前の予定が時間なしの時は、今の時刻を消さない(記録した時刻 12:07 が消えていた)
+    const time = prev ? (endOf(prev) || x.time) : (next?.time ? toHM(toMin(next.time) - 60) : x.time);
     if (x.after !== after || x.time !== time) {
       x.after = after; x.time = time; x.t0 = time; if (time) x.end = toHM(toMin(time) + 60);
       changed.push(x);
@@ -2348,7 +2352,7 @@ async function main() {
 // ---- 新しい版が出ていたら自動で読み直す(2026-11-19) ----
 // GitHub Pages のページは iPhone の Safari に最大10分ほど覚えられ、直した版がすぐ出なかった。
 // 開いた時に今の版の印(BUILD)を読みに行き、違えば1回だけ読み直す。直したら BUILD を変える(README の決まり)
-const BUILD = '2026-11-22-floor';
+const BUILD = '2026-11-22-drag';
 async function checkNewBuild() {
   try {
     const t = await (await fetch(location.pathname + '?build=' + Date.now(), { cache: 'no-store' })).text();
