@@ -1282,11 +1282,14 @@ function deleteDaily(i) {
 }
 async function addDaily(entry) {
   const cal = DAILY && gcalCals.length ? $('#dCal').value : '';
+  const hereLog = DAILY && $('#findSheet').dataset.here != null;
   if (cal) {
     store('localStorage', CALPICK_KEY, cal);
     try {
       const opt = {};
       if (!$('#dTime').value) { const a = afterLast(); opt.time = a.time; opt.after = a.after; }
+      // 今いるお店の記録は、今の時刻のまま、いちばん下の予定のあとに入れる(時間なしの予定より上に出てしまった。2026-11-22)
+      else if (hereLog) opt.after = afterLast().after;
       const ev = await gcalAdd(data.date, entry, cal, opt);
       store('sessionStorage', 'daily-focus', 'g:' + ev.id);
       location.href = dailyHref(data.date);
@@ -1294,7 +1297,7 @@ async function addDaily(entry) {
     return;
   }
   const box = localBox(), all = box.load();
-  const a = DAILY && !$('#dTime').value ? afterLast() : { after: '', time: $('#dTime').value || '' };
+  const a = DAILY && !$('#dTime').value ? afterLast() : { after: hereLog ? afterLast().after : '', time: $('#dTime').value || '' };
   const it = { id: Date.now(), name: entry.name, time: a.time, after: a.after, memo: $('#dMemo').value.trim(),
                lat: entry.lat ?? null, lng: entry.lng ?? null, country: entry.country || 'jp' };
   if (entry.kr) it.kr = entry.kr;
@@ -2332,7 +2335,7 @@ async function main() {
 // ---- 新しい版が出ていたら自動で読み直す(2026-11-19) ----
 // GitHub Pages のページは iPhone の Safari に最大10分ほど覚えられ、直した版がすぐ出なかった。
 // 開いた時に今の版の印(BUILD)を読みに行き、違えば1回だけ読み直す。直したら BUILD を変える(README の決まり)
-const BUILD = '2026-11-22-herelog';
+const BUILD = '2026-11-22-herelog2';
 async function checkNewBuild() {
   try {
     const t = await (await fetch(location.pathname + '?build=' + Date.now(), { cache: 'no-store' })).text();
