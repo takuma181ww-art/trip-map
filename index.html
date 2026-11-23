@@ -433,6 +433,15 @@
   #stockQ { width: 100%; box-sizing: border-box; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--text); font-family: inherit; font-size: 16px; padding: 9px 10px; }
   .found .tg { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 8px; font-size: 11px; font-weight: 700; background: var(--line); color: var(--sub); vertical-align: 1px; }
   .found .tg.mada { background: var(--accent); color: #fff; }
+  /* まだ(オレンジ)・完了(グレー)。押すと入れかわる */
+  .found li.stk { flex-direction: row; align-items: center; gap: 10px; }
+  .found li.stk .tx { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .found li.stk.done b { color: var(--sub); font-weight: 600; }
+  .found .tgb { flex: none; min-width: 60px; border: 0; border-radius: 16px; padding: 9px 10px; font-family: inherit; font-size: 12px; font-weight: 700; background: var(--accent); color: #fff; }
+  .found .tgb.done { background: var(--line); color: var(--sub); }
+  .stock-top { display: flex; gap: 8px; }
+  #stockSheet .stock-top #stockQ { flex: 1; min-width: 0; width: auto; margin: 0; }
+  #stockSheet .stock-top select { flex: none; width: auto; margin: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--text); font-family: inherit; font-size: 16px; padding: 0 6px; }
   .pin.stock { width: 20px; height: 20px; font-size: 10px; border-width: 2px; border-style: dashed; opacity: .6; box-shadow: none; }
   .pin.stock.mada { opacity: .9; border-style: solid; }
 </style>
@@ -514,9 +523,12 @@
 <div id="stockSheet" class="sheet-wrap" hidden>
   <div class="sheet" role="dialog" aria-label="ストックから足す">
     <h2>ストックから足す</h2>
-    <input id="stockQ" type="search" enterkeyhint="search" placeholder="エリアやお店の名前でしぼる(例: 丸の内・カフェ)" aria-label="ストックをしぼる">
+    <div class="stock-top">
+      <input id="stockQ" type="search" enterkeyhint="search" placeholder="エリアやお店の名前(例: 丸の内・カフェ)" aria-label="ストックをしぼる">
+      <select id="stockF" aria-label="まだ・完了でしぼる"><option value="">すべて</option><option value="mada">まだ</option><option value="done">完了</option></select>
+    </div>
     <ul class="found" id="stockList"></ul>
-    <p class="hint">TakuVLOG トラベルリストの写しです(家族のカレンダーにつないだ人だけが読めます)。押すと、場所を確かめてからこの日に足します。</p>
+    <p class="hint">TakuVLOG トラベルリストの写しです(家族のカレンダーにつないだ人だけが読めます)。お店を押すと、場所を確かめてからこの日に足します。右の「まだ」「完了」を押すと入れかわります(まちがえたら、もう一度押すと戻ります。トラベルリストにも数時間のうちに写ります)。</p>
     <div class="row"><button type="button" data-act="close">やめる</button></div>
   </div>
 </div>
@@ -1613,25 +1625,108 @@ async function loadStock() {
     stock = list;
     store('localStorage', STOCK_CACHE, JSON.stringify(list));
     showStock();
+    syncMarks();
   } catch (e) { /* 鍵が読めない人(家族のカレンダーがない)には出さない */ }
 }
 function showStock() {
   drawStockPins(true);
 }
 // 並び: まだ → 印なし → 確認中 → 行った。今いる所から 50km より遠いお店(旅先の分)は下へ
-const stockRank = e => (({ 'まだ': 0, '': 1, '確認中': 2, '行った': 3 })[e.t] ?? 1) + (stockDist(e) < Infinity && stockDist(e) > 50000 ? 10 : 0);
+const stockRank = e => (stockDone(e) ? 3 : stockMarks()[markKey(e)] ? 0 : ({ 'まだ': 0, '': 1, '確認中': 2 })[e.t] ?? 1) + (stockDist(e) < Infinity && stockDist(e) > 50000 ? 10 : 0);
 const stockDist = e => me && e.lat != null ? meters({ lat: me[0], lng: me[1] }, e) : Infinity;
 const stockPlanned = e => items.some(it => it.name && (it.name === e.n || it.name.includes(e.n) || e.n.includes(it.name)));
 function renderStockList() {
-  const q = $('#stockQ').value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const q = $('#stockQ').value.trim().toLowerCase().split(/\s+/).filter(Boolean), f = $('#stockF').value;
   const list = stock.map((e, k) => ({ e, k }))
     .filter(({ e }) => q.every(w => `${e.n} ${e.a} ${e.s || ''} ${e.m}`.toLowerCase().includes(w)))
+    .filter(({ e }) => !f || (f === 'done') === stockDone(e))
     .sort((a, b) => stockRank(a.e) - stockRank(b.e) || stockDist(a.e) - stockDist(b.e) || a.k - b.k);
   $('#stockList').innerHTML = list.slice(0, 80).map(({ e, k }) => {
     const d = stockDist(e);
-    return `<li data-k="${k}"><b>${esc(e.n)}${e.t ? `<span class="tg${e.t === 'まだ' ? ' mada' : ''}">${esc(e.t)}</span>` : ''}</b>` +
-      `<small>${esc(e.a.replace(/[((].*/, ''))}${e.s ? '・' + esc(e.s) : ''}${d < Infinity ? `・約${d < 950 ? Math.round(d / 50) * 50 + 'm' : (d / 1000).toFixed(1) + 'km'}` : ''}${e.m ? ' — ' + esc(e.m.slice(0, 44)) : ''}</small></li>`;
-  }).join('') || '<li><small>当てはまるお店がありません。ことばを変えてください。</small></li>';
+    const dn = stockDone(e);
+    return `<li class="stk${dn ? ' done' : ''}" data-k="${k}"><div class="tx"><b>${esc(e.n)}</b>` +
+      `<small>${esc(e.a.replace(/[((].*/, ''))}${e.s ? '・' + esc(e.s) : ''}${d < Infinity ? `・約${d < 950 ? Math.round(d / 50) * 50 + 'm' : (d / 1000).toFixed(1) + 'km'}` : ''}${e.m ? ' — ' + esc(e.m.slice(0, 44)) : ''}</small></div>` +
+      `<button type="button" class="tgb${dn ? ' done' : ''}" data-tg aria-label="${dn ? '完了(押すと「まだ」に戻す)' : 'まだ(押すと「完了」にする)'}">${dn ? '完了' : 'まだ'}</button></li>`;
+  }).join('') || '<li><small>当てはまるお店がありません。ことばやしぼり方を変えてください。</small></li>';
+}
+// ---- まだ ⇄ 完了 を押して変える(2026-11-23 Taku「実はもう行った店・押しまちがえた店を、その場で直せるように」) ----
+// 押した印はこの端末に覚え(すぐ色が変わる)、家族のカレンダーの 2020-01-02 の予定「トラベラーの印」の説明にも1行ずつ書く。
+// ほかの端末はそれを読んで同じ色になり、Mac の同期がその行を読んでトラベルリストの「#行った」「#まだ」を書きかえる。
+// リストの写し(stock.enc)が同じ印になったら、覚えた印と行は用済みなので消す。
+const STOCK_MARKS = 'stock-marks', MARK_HEAD = '【印】', MARK_TITLE = 'トラベラーの印', MARK_DAY = '2020-01-02';
+const markKey = e => `${e.n}|${e.a}`.replace(/\n/g, ' ');
+function stockMarks() { try { return JSON.parse(store('localStorage', STOCK_MARKS) || '{}') || {}; } catch (e) { return {}; } }
+const saveMarks = m => store('localStorage', STOCK_MARKS, JSON.stringify(m));
+const stockDone = e => { const m = stockMarks()[markKey(e)]; return m ? m.t === 'done' : e.t === '行った'; };
+// リストの写しと同じになった印を消す。変わったら true
+function pruneMarks(m) {
+  const by = new Map(stock.map(e => [markKey(e), e]));
+  let ch = false;
+  for (const k of Object.keys(m)) { const e = by.get(k); if (e && (m[k].t === 'done') === (e.t === '行った')) { delete m[k]; ch = true; } }
+  return ch;
+}
+// 押した行は、その場で色だけ変える(並びかえると行が動いて、押しまちがいを戻しにくい。並びは次にしぼった時・開いた時に変わる)
+function paintStockRows() {
+  $('#stockList').querySelectorAll('li[data-k]').forEach(li => {
+    const dn = stockDone(stock[+li.dataset.k]), b = li.querySelector('.tgb');
+    li.classList.toggle('done', dn);
+    if (b) { b.classList.toggle('done', dn); b.textContent = dn ? '完了' : 'まだ'; b.setAttribute('aria-label', dn ? '完了(押すと「まだ」に戻す)' : 'まだ(押すと「完了」にする)'); }
+  });
+}
+function toggleStock(e) {
+  const m = stockMarks(), k = markKey(e), to = stockDone(e) ? 'mada' : 'done';
+  if ((to === 'done') === (e.t === '行った')) delete m[k]; else m[k] = { t: to, d: todayStr() };
+  saveMarks(m);
+  paintStockRows(); drawStockPins(true);
+  toast(to === 'done' ? `「${e.n}」を完了にしました(もう一度押すと戻せます)` : `「${e.n}」を「まだ」に戻しました`);
+  clearTimeout(toggleStock.t); toggleStock.dirty = { ...(toggleStock.dirty || {}), [k]: 1 };
+  toggleStock.t = setTimeout(syncMarks, 1500);
+}
+const markLines = desc => { const o = {}; String(desc || '').split('\n').forEach(l => { const p = l.startsWith(MARK_HEAD) && l.slice(MARK_HEAD.length).split('|'); if (p && p.length >= 4) o[`${p[0]}|${p[1]}`] = { t: p[2] === '完了' ? 'done' : 'mada', d: p[3] }; }); return o; };
+// カレンダーの「トラベラーの印」と、この端末の印を合わせる。この端末でいま押した分(dirty)はこの端末が正しい。ほかはカレンダーが正しい
+let marksBusy = false;
+async function syncMarks() {
+  if (!gcalToken() || !stock.length) return;
+  if (marksBusy) { clearTimeout(toggleStock.t); toggleStock.t = setTimeout(syncMarks, 1500); return; }
+  marksBusy = true;
+  const dirty = toggleStock.dirty || {}; toggleStock.dirty = {};
+  try {
+    if (!gcalCals.length) gcalCals = await gcalCalendars();   // 開いてすぐは、まだカレンダーの一覧を読んでいないことがある
+    const cals = gcalCals.filter(c => c.canWrite).sort((a, b) => (b.label === 'ファミリー') - (a.label === 'ファミリー') || b.primary - a.primary);
+    let cal = null, ev = null, read = 0;
+    for (const c of cals) {
+      try {
+        const r = await gapi(`calendars/${encodeURIComponent(c.id)}/events?timeMin=${MARK_DAY}T00:00:00Z&timeMax=2020-01-03T00:00:00Z&singleEvents=true&maxResults=20`);
+        read++;
+        ev = (r.items || []).find(x => x.summary === MARK_TITLE && x.status !== 'cancelled');
+        if (ev) { cal = c; break; }
+      } catch (e) { if (e.auth) throw e; }
+    }
+    if (!ev && read < cals.length || !cals.length) throw new Error('カレンダーが読めません');   // 読めていないのに「行がない」とみなして印を消さない
+    const local = stockMarks(), unsent = Object.keys(local).filter(k => !local[k].p);
+    const remote = markLines(ev?.description), m = { ...remote };
+    for (const k of new Set([...Object.keys(dirty), ...unsent])) { if (local[k]) m[k] = local[k]; else if (dirty[k]) delete m[k]; }
+    pruneMarks(m);
+    const line = k => `${MARK_HEAD}${k}|${m[k].t === 'done' ? '完了' : 'まだ'}|${m[k].d || todayStr()}`;
+    const want = Object.keys(m).sort().map(line).join('\n'), had = Object.keys(remote).sort().map(k => `${MARK_HEAD}${k}|${remote[k].t === 'done' ? '完了' : 'まだ'}|${remote[k].d}`).join('\n');
+    if (want !== had) {
+      const head = 'トラベラーのストックで「まだ ⇄ 完了」を押した記録です(自動。消さないでください。トラベルリストに写ると行が消えます)';
+      const description = head + (want ? '\n' + want : '');
+      if (ev) await gapi(`calendars/${encodeURIComponent(cal.id)}/events/${encodeURIComponent(ev.id)}`, { method: 'PATCH', body: JSON.stringify({ description }) });
+      else if (want && cals[0]) await gapi(`calendars/${encodeURIComponent(cals[0].id)}/events`, { method: 'POST', body: JSON.stringify({ summary: MARK_TITLE, description, start: { date: MARK_DAY }, end: { date: '2020-01-03' }, transparency: 'transparent', reminders: { useDefault: false } }) });
+      else if (want) throw new Error('書けるカレンダーがありません');
+    }
+    // いま押した分は、合わせている間にまた押されていたら、そちら(端末)を残す
+    const now = stockMarks(), again = toggleStock.dirty || {};
+    for (const k of Object.keys(m)) m[k] = { ...m[k], p: 1 };
+    for (const k of Object.keys(again)) { if (now[k]) m[k] = now[k]; else delete m[k]; }
+    saveMarks(m);
+    paintStockRows();
+    drawStockPins(true);
+  } catch (e) {
+    // 書けなかった分は端末に残っている(p なし)。次に開いた時にもう一度書く
+    toggleStock.dirty = { ...dirty, ...(toggleStock.dirty || {}) };
+  } finally { marksBusy = false; }
 }
 // ストックのお店をこの日に足す: いつもの「探す」に名前と住所を渡し、Google の場所で確かめてから足す(位置がずれないように)
 function pickStock(e) {
@@ -1655,10 +1750,15 @@ function setupStock() {
       await loadStock();
       if (!stock.length) { try { localStorage.removeItem(STOCK_KEY); } catch (e) {} alert('鍵が合いませんでした。リンクをもう一度コピーして貼ってください'); return; }
     }
-    $('#stockQ').value = ''; renderStockList(); $('#stockSheet').hidden = false;
+    $('#stockQ').value = ''; $('#stockF').value = ''; renderStockList(); $('#stockSheet').hidden = false;
   });
   $('#stockQ').addEventListener('input', renderStockList);
-  $('#stockList').addEventListener('click', ev => { const li = ev.target.closest('li[data-k]'); if (li) pickStock(stock[+li.dataset.k]); });
+  $('#stockF').addEventListener('change', renderStockList);
+  $('#stockList').addEventListener('click', ev => {
+    const li = ev.target.closest('li[data-k]');
+    if (!li) return;
+    if (ev.target.closest('[data-tg]')) toggleStock(stock[+li.dataset.k]); else pickStock(stock[+li.dataset.k]);
+  });
   $('#stockSheet').addEventListener('click', ev => { if (ev.target.id === 'stockSheet' || ev.target.closest('button')?.dataset.act === 'close') $('#stockSheet').hidden = true; });
 }
 // 近くの「まだ行っていない」お店を、うすい印で地図に出す(今いる所から 3km、いなければその日の予定の場所から 1.5km。近い順に12個まで)
@@ -1668,13 +1768,13 @@ function drawStockPins(force = false) {
   stockDrawnAt = me ? [...me] : stockDrawnAt;
   const near = e => Math.min(stockDist(e) <= STOCK_NEAR_M ? stockDist(e) : Infinity,
     ...places().map(p => { const d = meters(p, e); return d <= 1500 ? d + STOCK_NEAR_M : Infinity; }));
-  const list = stock.map((e, k) => ({ e, k, d: e.lat != null && e.t !== '行った' && !stockPlanned(e) ? near(e) : Infinity }))
+  const list = stock.map((e, k) => ({ e, k, d: e.lat != null && !stockDone(e) && !stockPlanned(e) ? near(e) : Infinity }))
     .filter(x => x.d < Infinity).sort((a, b) => a.d - b.d).slice(0, STOCK_PIN_MAX);
   if (stockLayer) stockLayer.remove();
   stockLayer = L.layerGroup(list.map(({ e, k }) => {
     const m = L.marker([e.lat, e.lng], { icon: L.divIcon({ className: '', html: `<div class="pin stock${e.t === 'まだ' ? ' mada' : ''}">★</div>`, iconSize: [20, 20], iconAnchor: [10, 10] }),
       zIndexOffset: -500, keyboard: false, title: e.n });
-    m.bindPopup(`<div class="drop-pop"><b>${esc(e.n)}</b><small>ストック${e.t ? '(' + esc(e.t) + ')' : ''}・だいたいの位置${e.m ? '<br>' + esc(e.m.slice(0, 60)) : ''}</small><button type="button">この日に足す</button></div>`);
+    m.bindPopup(`<div class="drop-pop"><b>${esc(e.n)}</b><small>ストック(まだ)・だいたいの位置${e.m ? '<br>' + esc(e.m.slice(0, 60)) : ''}</small><button type="button">この日に足す</button></div>`);
     m.on('popupopen', ev => { const b = ev.popup.getElement()?.querySelector('button'); if (b) b.onclick = () => pickStock(stock[k]); });
     return m;
   })).addTo(map);
@@ -2585,7 +2685,7 @@ async function main() {
 // ---- 新しい版が出ていたら自動で読み直す(2026-11-19) ----
 // GitHub Pages のページは iPhone の Safari に最大10分ほど覚えられ、直した版がすぐ出なかった。
 // 開いた時に今の版の印(BUILD)を読みに行き、違えば1回だけ読み直す。直したら BUILD を変える(README の決まり)
-const BUILD = '2026-11-22-stockkey';
+const BUILD = '2026-11-23-stock-toggle';
 async function checkNewBuild() {
   try {
     const t = await (await fetch(location.pathname + '?build=' + Date.now(), { cache: 'no-store' })).text();
